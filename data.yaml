@@ -1,0 +1,6 @@
+train: ./training_data/train/images
+val: ./training_data/val/images
+test: ./training_data/test/images
+
+nc: 1
+names: ['robot']

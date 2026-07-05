@@ -1,0 +1,17 @@
+/training_data/*
+/re_id_model/sorted_frames_with_boxes/*
+/re_id_model/dataset/all_data/*
+/re_id_model/dataset/train/*
+/re_id_model/dataset/val/*
+/re_id_model/new_frames/*
+re_id_model/dataset/new_frames/*
+/runs/*
+/test_frames/*
+
+*.pt
+*.keras
+*.mp4
+*/__pycache__/*
+
+*/data.yaml
+re_id_model/notes.txt

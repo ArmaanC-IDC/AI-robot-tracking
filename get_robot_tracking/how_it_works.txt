@@ -1,0 +1,9 @@
+Associating points from one frame to another:
+ - initialize 6 Track objects, and fill as many as possible based on how many robots are seen
+ - every frame:
+ -- check each Track to find predicted point and possible distance from that point. 
+ --- If there is only one possibility, append it to the Track
+ --- If there are multiple possiblities, use the re-id model
+ ---- if the re-id model has high confidence, append it
+ ---- if the re-id model has low confidence, mark track as lost
+ --- If there are no possibilities, mark Track as lost.
