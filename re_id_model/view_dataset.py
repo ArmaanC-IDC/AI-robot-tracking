@@ -3,6 +3,12 @@ import random
 import os
 import cv2
 import matplotlib.pyplot as plt
+from keras import Sequential
+from keras.layers import RandomFlip, RandomRotation, RandomBrightness, RandomZoom, RandomTranslation,  RandomContrast
+
+#note: selection method for data is different in real training
+
+folder_path = "./dataset/train"
 
 def get_data_generator(main_folder, batch_size=32, image_size=(128, 128)):
     
@@ -67,8 +73,6 @@ def load_image(path, image_size):
     img = ((img / 127.5) - 1.0).astype(np.float32)
     return img
 
-
-folder_path = "sorted_frames"
 gen = get_data_generator(folder_path, batch_size=8, image_size=(128, 128))
 
 # 2. Pull exactly one batch from the generator using next()
@@ -78,9 +82,21 @@ gen = get_data_generator(folder_path, batch_size=8, image_size=(128, 128))
 fig, axes = plt.subplots(8, 2, figsize=(8, 20))
 plt.subplots_adjust(wspace=0.1, hspace=0.4)
 
+augmenter = Sequential([
+    RandomFlip("horizontal"),
+    RandomRotation(0.1),
+    RandomBrightness(0.2, value_range=(-1, 1)),
+    RandomContrast(0.5, value_range=(-1, 1)),
+    RandomZoom(0.15),
+    RandomTranslation(height_factor=0.1, width_factor=0.1)
+])
+
 for i in range(8):
     # A. The images are currently floats from -1.0 to 1.0. 
     # We must un-normalize them back to 0-255 uint8 integers to view them.
+    batch_a[i] = augmenter(batch_a[i])
+    batch_b[i] = augmenter(batch_b[i])
+
     img_a = ((batch_a[i] + 1.0) * 127.5).astype(np.uint8)
     img_b = ((batch_b[i] + 1.0) * 127.5).astype(np.uint8)
 
@@ -93,10 +109,10 @@ for i in range(8):
     axes[i, 1].imshow(img_b)
     axes[i, 1].axis('off')
     
-    label_val = batch_labels[i]
-    label_text = "MATCH (1.0)" if label_val == 1.0 else "DIFFERENT (0.0)"
-    color = "green" if label_val == 1.0 else "red"
+    # label_val = batch_labels[i]
+    # label_text = "MATCH (1.0)" if label_val == 1.0 else "DIFFERENT (0.0)"
+    # color = "green" if label_val == 1.0 else "red"
     
-    axes[i, 1].set_title(f"Image B | {label_text}", color=color)
+    # axes[i, 1].set_title(f"Image B | {label_text}", color=color)
 
 plt.show()

@@ -1,6 +1,7 @@
 Training steps:
  - start with train9/model.keras (10 epochs at 1e-3 learning rate with the MobileNetV2 weights frozen)
  - do 50 epochs at 3e-5 learning rate with the last 50 layers of the embedding model unfrozen, the rest still frozen
+ - batch size of 32
 
 Loss function: triplet loss (random sampling to get pairs)
 

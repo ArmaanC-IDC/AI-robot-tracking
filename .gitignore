@@ -15,3 +15,4 @@ re_id_model/dataset/new_frames/*
 
 */data.yaml
 re_id_model/notes.txt
+re_id_model/siamese_train/train12/model.weights.h5

@@ -1,0 +1,16 @@
+epoch,train_loss,val_loss,mean_dist_matches,mean_dist_non_matches
+1,"tf.Tensor(0.54561836, shape=(), dtype=float32)",0.43672037,10.910156,0.90615356
+2,"tf.Tensor(0.3723399, shape=(), dtype=float32)",0.523149,10.985285,0.92282265
+3,"tf.Tensor(0.33686948, shape=(), dtype=float32)",0.60698634,11.025357,0.9293629
+4,"tf.Tensor(0.3162189, shape=(), dtype=float32)",0.6215033,11.03183,0.92027086
+5,"tf.Tensor(0.2811681, shape=(), dtype=float32)",0.6689376,11.065603,0.91083914
+6,"tf.Tensor(0.2838995, shape=(), dtype=float32)",0.60739565,11.072264,0.97189945
+7,"tf.Tensor(0.26856938, shape=(), dtype=float32)",0.48833996,11.068354,1.03466
+8,"tf.Tensor(0.22490133, shape=(), dtype=float32)",0.40175456,11.090523,1.0383874
+9,"tf.Tensor(0.21011204, shape=(), dtype=float32)",0.4782242,11.097841,1.0509536
+10,"tf.Tensor(0.20492654, shape=(), dtype=float32)",0.4010994,11.087011,1.0693367
+11,"tf.Tensor(0.20705031, shape=(), dtype=float32)",0.4224196,11.105683,1.108241
+12,"tf.Tensor(0.20942594, shape=(), dtype=float32)",0.42687696,11.106016,1.066908
+13,"tf.Tensor(0.19071998, shape=(), dtype=float32)",0.4334407,11.115014,1.0894104
+14,"tf.Tensor(0.18640198, shape=(), dtype=float32)",0.45884174,11.110328,1.0973024
+15,"tf.Tensor(0.21048622, shape=(), dtype=float32)",0.45759693,11.113451,1.165232

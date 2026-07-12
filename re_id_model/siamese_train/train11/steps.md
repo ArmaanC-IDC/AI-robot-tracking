@@ -2,7 +2,9 @@ Trained with new dataset with triplet loss (random sampling to get pairs)
 
 20 epochs on 3e-3 learning rate with base frozen
 
-34 epochs on 3e-5 learning rate with last 50 layers unfrozen
+34 epochs on 3e-5 learning rate with last 50 layers 
+
+batch size of 32
 
 Augmentations:
     RandomFlip("horizontal"),

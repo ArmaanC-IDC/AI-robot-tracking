@@ -10,6 +10,11 @@ import random
 import cv2
 import numpy as np
 import os
+import csv
+
+filepath = "siamese_train/train12"
+
+dataset_filepath = "dataset"
 
 @keras.saving.register_keras_serializable()
 def dist(vects):
@@ -17,65 +22,58 @@ def dist(vects):
     sum_square = K.sum(K.square(x - y), axis=1, keepdims=True)
     return K.sqrt(K.maximum(sum_square, K.epsilon()))
 
+#TODO: Review augmentations (ensure robots are still recognizable)
+#Faisal was right: many images were fully unrecognizable
 augmenter = Sequential([
     RandomFlip("horizontal"),
-    RandomRotation(0.15),
-    RandomBrightness(0.3),
-    RandomContrast(0.3),
-    RandomZoom(0.15),
-    RandomTranslation(height_factor=0.15, width_factor=0.15)
+    RandomRotation(0.1),
+    RandomBrightness(0.2, value_range=(-1, 1)),
+    RandomContrast(0.5, value_range=(-1, 1)),
+    # RandomZoom(0.3),
+    # RandomTranslation(height_factor=0.15, width_factor=0.15)
 ])
-
-filepath = "siamese_train/train12"
 
 image_shape = (128, 128, 3)
 
-def get_data_generator(main_folder, batch_size=32, image_size=(128, 128)):
+def get_data(main_folder, P=4, K=4, image_size=(128, 128)):
+    x_train = []
+    y_train = []
+
+    robots = [r for r in os.listdir(main_folder) if os.path.isdir(os.path.join(main_folder, r))]
+    r_to_id = {r: idx for idx, r in enumerate(robots)}
+
+    for r in robots:
+        image_paths = [os.path.join(main_folder, r, f) for f in os.listdir(os.path.join(main_folder, r))]
+
+        for path in image_paths:
+            x_train.append(load_image(path, image_size))
+            y_train.append(r_to_id[r])
     
-    image_per_robot = {}
-    robots = []
-    for robot in [f for f in os.listdir(main_folder) if os.path.isdir(os.path.join(main_folder, f))]:
-        robot_folder_path = os.path.join(main_folder, robot)
-        image_per_robot[robot] = [
-            os.path.join(robot_folder_path, f)
-            for f in os.listdir(os.path.join(main_folder, robot)) 
-            if os.path.isfile(os.path.join(robot_folder_path, f))
-        ]
-        if len(image_per_robot[robot]) > 1:
-            robots.append(robot)
-    
-    def generator():
-        while True:
-
-
-            a, p, n = [], [], []
-
-            for _ in range(batch_size):
-                robot_a = random.choice(robots)
-
-                anchor_path, positive_path = random.sample(image_per_robot[robot_a], 2)
-
-                robot_n = random.choice(robots)
-                while robot_n==robot_a:
-                    robot_n = random.choice(robots)
-                
-                negative_path = random.sample(image_per_robot[robot_n], 1)[0]
-
-                a.append(load_image(anchor_path, image_size))
-                p.append(load_image(positive_path, image_size))
-                n.append(load_image(negative_path, image_size))
-            
-            dummy_labels = np.zeros((batch_size,), dtype=np.float32)
-            
-            yield (
-                (np.array(a, dtype=np.float32), 
-                 np.array(p, dtype=np.float32), 
-                 np.array(n, dtype=np.float32)),
-                 dummy_labels
-            )
-    
-    return generator()
+    return x_train, y_train
         
+def pk_generator(x_data, y_data, P, K):
+    class_idxs = {}
+    for idx, label in enumerate(y_data):
+        if label not in class_idxs:
+            class_idxs[label] = []
+        class_idxs[label].append(idx)
+
+    unique_classes = list(class_idxs.keys())
+
+    while True:
+        selected_robots = random.sample(unique_classes, P)
+
+        imgs = []
+        labels = []
+
+        for robot in selected_robots:
+            selected_idxs = random.sample(class_idxs[robot], K)
+
+            for idx in selected_idxs:
+                imgs.append(x_data[idx])
+                labels.append(y_data[idx])
+        
+        yield np.array(imgs, dtype=np.float32), np.array(labels, dtype=np.float32)
 
 def load_image(path, image_size):
     img = cv2.imread(path)
@@ -84,113 +82,209 @@ def load_image(path, image_size):
     img = ((img / 127.5) - 1.0).astype(np.float32)
     return img
 
-@keras.saving.register_keras_serializable()
-class TripletLoss(tf.keras.losses.Loss):
-    def __init__(self, margin=1.0, **kwargs):
-        super().__init__(**kwargs)
-        self.margin = margin
-
-    def call(self, label, prediction):
-        d_pos = prediction[:, 0]
-        d_neg = prediction[:, 1]
-
-        loss = K.maximum(d_pos - d_neg + self.margin, 0.0)
-        return K.mean(loss)
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({"margin": self.margin})
-        return config
-
-@keras.saving.register_keras_serializable()
-def mean_dist_matches(label, prediction):
-    return K.mean(prediction[:, 0])
-
-@keras.saving.register_keras_serializable()
-def mean_dist_non_matches(label, prediction):
-    return K.mean(prediction[:, 1])
-
-csv_logger = CSVLogger(filepath + '/results.csv', append=True)
-
-checkpoint = ModelCheckpoint(
-    filepath=filepath + '/model.keras', 
-    monitor='loss',
-    save_best_only=True,
-    verbose=1
-)
-
-output_signature = (
-    (
-        tf.TensorSpec(shape=(None, 128, 128, 3), dtype=tf.float32), 
-        tf.TensorSpec(shape=(None, 128, 128, 3), dtype=tf.float32),
-        tf.TensorSpec(shape=(None, 128, 128, 3), dtype=tf.float32)
-    ),
-    tf.TensorSpec(shape=(None,), dtype=tf.float32)
-)
-
-train_dataset = tf.data.Dataset.from_generator(
-    lambda: get_data_generator("dataset/train"),
-    output_signature=output_signature
-).prefetch(tf.data.AUTOTUNE)
-
-val_dataset = tf.data.Dataset.from_generator(
-    lambda: get_data_generator("dataset/val"),
-    output_signature=output_signature
-).prefetch(tf.data.AUTOTUNE)
-
-# loss_function = TripletLoss(margin=1.0)
-
 base = MobileNetV2(weights="imagenet", include_top=False, input_shape=image_shape) #has 154 layers.
 base.trainable = False
 
 x = GlobalAveragePooling2D()(base.output)
 x = tf.keras.layers.Dropout(0.5)(x)
 x = Dense(128, activation="relu")(x)
+#TODO: Add more layers (look into)
+#TODO: Look into auto-encoder
 x = tf.keras.layers.UnitNormalization()(x)
 
 embedding_model = Model(base.input, x, name="embedding")
 
-input_a = Input(shape=(128, 128, 3), name="input_a")
-input_p = Input(shape=(128, 128, 3), name="input_b")
-input_n = Input(shape=(128, 128, 3), name="input_n")
+input = Input(shape=(128, 128, 3), name="input")
 
-augmented_a = augmenter(input_a)
-augmented_p = augmenter(input_p)
-augmented_n = augmenter(input_n)
+augmented = augmenter(input)
 
-embedding_a = embedding_model(augmented_a)
-embedding_p = embedding_model(augmented_p)
-embedding_n = embedding_model(augmented_n)
+embedding = embedding_model(augmented)
 
-dist_p = Lambda(dist)([embedding_a, embedding_p])
-dist_n = Lambda(dist)([embedding_a, embedding_n])
-
-output = Concatenate(axis=1)([dist_p, dist_n])
-
-model = Model(inputs=[input_a, input_p, input_n], outputs=output, name="final")
+model = tfsim.models.SimilarityModel(input, embedding)
 
 # model = load_model(filepath + "/model.keras", compile=False, custom_objects={
 #     "dist": dist, 
 # })
 
-# embedding_model = model.get_layer("embedding")
-# for layer in embedding_model.layers:
-#     layer.trainable = False
-# for layer in embedding_model.layers[-50:]:
-#     layer.trainable = True
+for layer in base.layers:
+    layer.trainable = False
+for layer in embedding_model.layers[-50:]:
+    layer.trainable = True
 
-loss_function = tfsim.losses.TripletLoss(
-    distance="l2", 
-    margin=1.0, 
-    mining="semi-hard"
-)
+margin = 1.0
 
-model.compile(loss=loss_function, optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5), metrics=[mean_dist_matches, mean_dist_non_matches])
-model.fit(
-    train_dataset, 
-    epochs=50, 
-    validation_data=val_dataset, 
-    callbacks=[csv_logger, checkpoint],
-    steps_per_epoch=100,
-    validation_steps=25,
-)
+P_VAL_TRAIN = 4
+K_VAL_TRAIN = 4
+
+x_train, y_train = get_data(dataset_filepath + "/train")
+x_val, y_val = get_data(dataset_filepath + "/val")
+
+dataset_train = tf.data.Dataset.from_generator(
+    lambda: pk_generator(x_train, y_train, P=P_VAL_TRAIN, K=K_VAL_TRAIN),
+    output_signature=(
+        tf.TensorSpec(shape=(None, 128, 128, 3), dtype=tf.float32), 
+        tf.TensorSpec(shape=(None,), dtype=tf.float32)
+    )
+).prefetch(tf.data.AUTOTUNE)
+
+train_steps_per_epoch = len(x_train) // (P_VAL_TRAIN * K_VAL_TRAIN)
+
+P_VAL_VAL = 8
+K_VAL_VAL = 2
+dataset_val = tf.data.Dataset.from_generator(
+    lambda: pk_generator(x_val, y_val, P=P_VAL_VAL, K=K_VAL_VAL),
+    output_signature=(
+        tf.TensorSpec(shape=(None, 128, 128, 3), dtype=tf.float32), 
+        tf.TensorSpec(shape=(None,), dtype=tf.float32)
+    )
+).prefetch(tf.data.AUTOTUNE)
+
+val_steps_per_epoch = len(x_val) // (P_VAL_VAL * K_VAL_VAL)
+
+# dataset_val = tf.data.Dataset.from_tensor_slices((x_val, y_val))
+# dataset_val = (
+#     dataset_val.shuffle(buffer_size=1000).batch(16).prefetch(tf.data.AUTOTUNE)
+# )
+
+optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
+
+def mine_semi_hard_triplets(embeddings, labels, margin=1.0):
+    norms = np.sum(embeddings**2, axis=1, keepdims=True)
+    dist_matrix = norms + tf.transpose(norms) - 2 * np.dot(embeddings, tf.transpose(embeddings))
+    dist_matrix = np.maximum(dist_matrix, 0.0)
+
+    triplets = []
+    for i in range(len(labels)):
+        pos_mask = (labels == labels[i])
+        neg_mask = (labels != labels[i])
+        
+        pos_indices = np.where(pos_mask)[0]
+        d_ap = np.max(dist_matrix[i, pos_indices])
+        
+        neg_indices = np.where(neg_mask)[0]
+        semi_hard_negatives = [idx for idx in neg_indices 
+                               if d_ap < dist_matrix[i, idx] < d_ap + margin]
+        
+        if semi_hard_negatives:
+            n_idx = np.random.choice(semi_hard_negatives)
+            triplets.append((i, np.random.choice(pos_indices), n_idx))
+        
+    if len(triplets) == 0:
+        return np.empty((0, 3), dtype=np.int32)
+    
+    return np.array(triplets, dtype=np.int32)
+
+def calculate_triplet_loss(embeddings, triplet_indices):
+    anchors = tf.gather(embeddings, triplet_indices[:, 0])
+    positives = tf.gather(embeddings, triplet_indices[:, 1])
+    negatives = tf.gather(embeddings, triplet_indices[:, 2])
+
+    d_pos = tf.reduce_sum(tf.square(anchors - positives), axis=1)
+    d_neg = tf.reduce_sum(tf.square(anchors - negatives), axis=1)
+
+    loss = tf.maximum(d_pos - d_neg + margin, 0.0)
+    return tf.reduce_mean(loss)
+
+@tf.function
+def train_step(images, labels):
+    with tf.GradientTape() as tape:
+        embeddings = model(images, training=True)
+        
+        triplet_indices = tf.py_function(
+            func=mine_semi_hard_triplets, 
+            inp=[embeddings, labels], 
+            Tout=tf.int32 
+        )
+
+        triplet_indices.set_shape([None, 3])
+
+        if tf.shape(triplet_indices)[0] == 0:
+            loss = -1.0
+        
+        else:
+            loss = calculate_triplet_loss(embeddings, triplet_indices)
+
+    if loss >= 0.0:
+        gradients = tape.gradient(loss, model.trainable_variables)
+        
+        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    return loss
+
+def val_step(images, labels):
+    embeddings = model(images, training=False)
+
+    triplet_indices = tf.py_function(
+        func=mine_semi_hard_triplets, 
+        inp=[embeddings, labels], 
+        Tout=tf.int32 
+    )
+
+    if tf.shape(triplet_indices)[0] == 0:
+        loss = np.nan
+    
+    else:
+        loss = calculate_triplet_loss(embeddings, triplet_indices)
+
+    mean_dist_matches = np.mean([np.linalg.norm(embeddings[i] - embeddings[j])
+                                for i in range(len(embeddings)) 
+                                for j in range(len(embeddings))
+                                if i!=j and labels[i]==labels[j]])
+    
+    mean_dist_non_matches = np.mean([np.linalg.norm(embeddings[i] - embeddings[j])
+                                for i in range(len(embeddings)) 
+                                for j in range(len(embeddings))
+                                if i!=j and labels[i]!=labels[j]])
+    return loss, mean_dist_matches, mean_dist_non_matches
+
+best_val_loss = float("inf")
+
+file_exists = os.path.isfile(filepath + "/results.csv")
+
+with open(filepath + "/results.csv", mode="a", newline="") as file:
+    writer = csv.writer(file)
+    if not file_exists:
+        writer.writerow(["epoch", "train_loss", "val_loss", "mean_dist_matches", "mean_dist_non_matches"])
+
+    for epoch in range(50):
+        print("starting epoch " + str(epoch) + " ---------------")
+
+        total_train_loss = 0
+        count = 0
+        train_iterator = iter(dataset_train)
+        val_iterator = iter(dataset_val)
+
+        for step in range(train_steps_per_epoch):
+
+            images, labels = next(train_iterator)
+            loss = train_step(images, labels)
+            if loss >=0:
+                count += 1
+                total_train_loss += loss
+
+        val_losses, mean_dists_matches, mean_dists_non_matches = [], [], []
+        for step in range(val_steps_per_epoch):
+            images, labels = next(val_iterator)
+
+            loss, mean_dist_matches, mean_dist_non_matches = val_step(images, labels)
+            val_losses.append(loss)
+            mean_dists_matches.append(mean_dist_matches)
+            mean_dists_non_matches.append(mean_dist_non_matches)
+            
+        train_loss = total_train_loss/count
+        val_loss = np.nanmean(val_losses)
+        mean_dist_matches = np.nanmean(mean_dists_matches)
+        mean_dist_non_matches = np.nanmean(mean_dists_non_matches)
+
+        
+        print(f"train loss: {train_loss:.4f}")
+        print(f"val loss: {val_loss:.4f}")
+        print(f"mean dist matches: {mean_dist_matches:.4f}")
+        print(f"mean_dist_non_matches: {mean_dist_non_matches:.4f}")
+        print()
+
+        writer.writerow([epoch + 1, train_loss, val_loss, mean_dist_matches, mean_dist_non_matches])
+
+        if val_loss < best_val_loss:
+            print(f"Saving new model with a loss of {val_loss}, which is better than {best_val_loss}")
+            best_val_loss = val_loss
+            model.save_weights(filepath + "/model.weights.h5")

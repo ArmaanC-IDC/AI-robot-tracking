@@ -6,8 +6,11 @@ import cv2
 import keras
 import os
 
-img1_path = "./test_data/254/1.jpg"
-img2_paths = "./test_data/254"
+img1_path = "./dataset/val/2046_b/1.jpg"
+img2_paths = "./dataset/val/2046_b"
+img3_paths = "./dataset/val/4414_r"
+
+MODEL_FILE = "siamese_train/train11/model.keras"
 
 @keras.saving.register_keras_serializable()
 def dist(vects):
@@ -34,8 +37,6 @@ def preprocess_image(image_path, target_size=(128, 128)):
 
     return np.expand_dims(img, axis=0)
 
-MODEL_FILE = "siamese_train/train10/model.keras"
-
 full_model = load_model(MODEL_FILE, compile=False, custom_objects={
     "dist": dist,
     "TripletLoss": TripletLoss,
@@ -46,18 +47,34 @@ full_model = load_model(MODEL_FILE, compile=False, custom_objects={
 embedding_extractor = full_model.get_layer("embedding")
 
 img1 = preprocess_image(img1_path)
+emb1 = embedding_extractor.predict(img1, verbose=0)
+
 img2_embeddings = [embedding_extractor.predict(preprocess_image(os.path.join(img2_paths, f)))
                     for f in os.listdir(img2_paths) if f.lower().endswith('.jpg')]
 
-emb1 = embedding_extractor.predict(img1, verbose=0)
+img2_dists = [np.linalg.norm(emb - emb1) for emb in img2_embeddings if np.linalg.norm(emb - emb1) != 0]
 
-num_matches = 0
+img3_embeddings = [embedding_extractor.predict(preprocess_image(os.path.join(img3_paths, f)))
+                    for f in os.listdir(img3_paths) if f.lower().endswith('.jpg')]
 
-for emb2 in img2_embeddings:
-    dist = np.linalg.norm(emb1 - emb2)
-    print(f"dist: {dist}")
+img3_dists = [np.linalg.norm(emb - emb1) for emb in img3_embeddings if np.linalg.norm(emb - emb1) != 0]
 
-    if dist <= 0.45:
-        num_matches += 1
+print("image 2: match-------------")
+for i in range(len(img2_dists)):
+    print(f"{i}: {img2_dists[i]}")
 
-print(f"Matched with {num_matches} of the {len(img2_embeddings)} images, or {((num_matches/len(img2_embeddings))*100):.2f}%")
+print("image 3: non-match-----------")
+for i in range(len(img3_dists)):
+    print(f"{i}: {img3_dists[i]}")
+
+print(f"Mean 2: {np.mean(img2_dists)}. Mean 3: {np.mean(img3_dists)}")
+# num_matches = 0
+
+# for emb2 in img2_embeddings:
+#     dist = np.linalg.norm(emb1 - emb2)
+#     print(f"dist: {dist}")
+
+#     if dist <= 0.45:
+#         num_matches += 1
+
+# print(f"Matched with {num_matches} of the {len(img2_embeddings)} images, or {((num_matches/len(img2_embeddings))*100):.2f}%")
