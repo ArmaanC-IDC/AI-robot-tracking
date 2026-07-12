@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras.models import Model, Sequential, load_model
-from tensorflow.keras.layers import Input, Dense, GlobalAveragePooling2D, RandomFlip, RandomRotation, RandomBrightness, RandomZoom, RandomTranslation,  Lambda, Concatenate, RandomContrast
+from tensorflow.keras.layers import Input, Dense, GlobalAveragePooling2D
 from tensorflow.keras.applications import MobileNetV2
 import tensorflow.keras.backend as K
 from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger
@@ -11,8 +11,9 @@ import cv2
 import numpy as np
 import os
 import csv
+from data_augmentations import augmenter
 
-filepath = "siamese_train/train12"
+filepath = "siamese_train/train15"
 
 dataset_filepath = "dataset"
 
@@ -21,17 +22,6 @@ def dist(vects):
     x, y = vects
     sum_square = K.sum(K.square(x - y), axis=1, keepdims=True)
     return K.sqrt(K.maximum(sum_square, K.epsilon()))
-
-#TODO: Review augmentations (ensure robots are still recognizable)
-#Faisal was right: many images were fully unrecognizable
-augmenter = Sequential([
-    RandomFlip("horizontal"),
-    RandomRotation(0.1),
-    RandomBrightness(0.2, value_range=(-1, 1)),
-    RandomContrast(0.5, value_range=(-1, 1)),
-    # RandomZoom(0.3),
-    # RandomTranslation(height_factor=0.15, width_factor=0.15)
-])
 
 image_shape = (128, 128, 3)
 
@@ -86,7 +76,7 @@ base = MobileNetV2(weights="imagenet", include_top=False, input_shape=image_shap
 base.trainable = False
 
 x = GlobalAveragePooling2D()(base.output)
-x = tf.keras.layers.Dropout(0.5)(x)
+x = tf.keras.layers.Dropout(0.7)(x)
 x = Dense(128, activation="relu")(x)
 #TODO: Add more layers (look into)
 #TODO: Look into auto-encoder
@@ -101,6 +91,8 @@ augmented = augmenter(input)
 embedding = embedding_model(augmented)
 
 model = tfsim.models.SimilarityModel(input, embedding)
+
+# model.load_weights("siamese_train/train13" + "/model.weights.h5")
 
 # model = load_model(filepath + "/model.keras", compile=False, custom_objects={
 #     "dist": dist, 
@@ -146,7 +138,7 @@ val_steps_per_epoch = len(x_val) // (P_VAL_VAL * K_VAL_VAL)
 #     dataset_val.shuffle(buffer_size=1000).batch(16).prefetch(tf.data.AUTOTUNE)
 # )
 
-optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
+optimizer = tf.keras.optimizers.Adam(learning_rate=1e-5)
 
 def mine_semi_hard_triplets(embeddings, labels, margin=1.0):
     norms = np.sum(embeddings**2, axis=1, keepdims=True)
@@ -170,9 +162,34 @@ def mine_semi_hard_triplets(embeddings, labels, margin=1.0):
             triplets.append((i, np.random.choice(pos_indices), n_idx))
         
     if len(triplets) == 0:
+        print("No semi-hard triplets")
         return np.empty((0, 3), dtype=np.int32)
     
     return np.array(triplets, dtype=np.int32)
+
+def mine_triplets(images, labels, margin=1.0):
+    labels = labels.numpy()
+    labels = labels.reshape(-1, 1)
+    
+    is_same = (labels == labels.T)
+    is_diff = (labels != labels.T)
+    
+    same_coords = np.argwhere(is_same) #all anchor/pos pairs
+    diff_coords = np.argwhere(is_diff) #all anchor/neg pairs
+    triplets = []
+    
+    a_to_p = {}
+    for a, p in same_coords:
+        if a != p:
+            if a not in a_to_p: a_to_p[a] = []
+            a_to_p[a].append(p)
+            
+    for a, n in diff_coords:
+        if a in a_to_p:
+            for p in a_to_p[a]:
+                triplets.append((a, p, n))
+                
+    return np.array(triplets)
 
 def calculate_triplet_loss(embeddings, triplet_indices):
     anchors = tf.gather(embeddings, triplet_indices[:, 0])
@@ -191,8 +208,8 @@ def train_step(images, labels):
         embeddings = model(images, training=True)
         
         triplet_indices = tf.py_function(
-            func=mine_semi_hard_triplets, 
-            inp=[embeddings, labels], 
+            func=mine_triplets, 
+            inp=[images, labels], 
             Tout=tf.int32 
         )
 
@@ -210,12 +227,13 @@ def train_step(images, labels):
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
     return loss
 
+# @tf.function
 def val_step(images, labels):
     embeddings = model(images, training=False)
 
     triplet_indices = tf.py_function(
-        func=mine_semi_hard_triplets, 
-        inp=[embeddings, labels], 
+        func=mine_triplets, 
+        inp=[images, labels], 
         Tout=tf.int32 
     )
 
@@ -248,18 +266,16 @@ with open(filepath + "/results.csv", mode="a", newline="") as file:
     for epoch in range(50):
         print("starting epoch " + str(epoch) + " ---------------")
 
-        total_train_loss = 0
-        count = 0
         train_iterator = iter(dataset_train)
         val_iterator = iter(dataset_val)
 
+        train_losses = []
         for step in range(train_steps_per_epoch):
 
             images, labels = next(train_iterator)
             loss = train_step(images, labels)
             if loss >=0:
-                count += 1
-                total_train_loss += loss
+                train_losses.append(loss)
 
         val_losses, mean_dists_matches, mean_dists_non_matches = [], [], []
         for step in range(val_steps_per_epoch):
@@ -270,7 +286,7 @@ with open(filepath + "/results.csv", mode="a", newline="") as file:
             mean_dists_matches.append(mean_dist_matches)
             mean_dists_non_matches.append(mean_dist_non_matches)
             
-        train_loss = total_train_loss/count
+        train_loss = np.nanmean(train_losses)
         val_loss = np.nanmean(val_losses)
         mean_dist_matches = np.nanmean(mean_dists_matches)
         mean_dist_non_matches = np.nanmean(mean_dists_non_matches)

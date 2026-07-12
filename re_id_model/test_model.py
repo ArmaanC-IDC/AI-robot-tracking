@@ -1,16 +1,45 @@
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 import tensorflow.keras.backend as K
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.layers import Input, Dense, GlobalAveragePooling2D
+from tensorflow.keras.models import Model
+import tensorflow_similarity as tfsim
 import numpy as np
 import cv2
 import keras
 import os
+from model.data_augmentations import augmenter
 
 img1_path = "./dataset/val/2046_b/1.jpg"
 img2_paths = "./dataset/val/2046_b"
 img3_paths = "./dataset/val/4414_r"
 
-MODEL_FILE = "siamese_train/train11/model.keras"
+image_shape = (128, 128, 3)
+
+MODEL_FILE = "siamese_train/train15/model.weights.h5"
+
+base = MobileNetV2(weights="imagenet", include_top=False, input_shape=image_shape) #has 154 layers.
+base.trainable = False
+
+x = GlobalAveragePooling2D()(base.output)
+x = tf.keras.layers.Dropout(0.7)(x)
+x = Dense(128, activation="relu")(x)
+#TODO: Add more layers (look into)
+#TODO: Look into auto-encoder
+x = tf.keras.layers.UnitNormalization()(x)
+
+embedding_model = Model(base.input, x, name="embedding")
+
+input = Input(shape=(128, 128, 3), name="input")
+
+augmented = augmenter(input)
+
+embedding = embedding_model(augmented)
+
+model = tfsim.models.SimilarityModel(input, embedding)
+
+model.load_weights(MODEL_FILE)
 
 @keras.saving.register_keras_serializable()
 def dist(vects):
@@ -37,14 +66,7 @@ def preprocess_image(image_path, target_size=(128, 128)):
 
     return np.expand_dims(img, axis=0)
 
-full_model = load_model(MODEL_FILE, compile=False, custom_objects={
-    "dist": dist,
-    "TripletLoss": TripletLoss,
-    "mean_dist_positive": mean_dist_positive,
-    "mean_dist_negative": mean_dist_negative
-})
-
-embedding_extractor = full_model.get_layer("embedding")
+embedding_extractor = model.get_layer("embedding")
 
 img1 = preprocess_image(img1_path)
 emb1 = embedding_extractor.predict(img1, verbose=0)

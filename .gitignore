@@ -15,4 +15,5 @@ re_id_model/dataset/new_frames/*
 
 */data.yaml
 re_id_model/notes.txt
-re_id_model/siamese_train/train12/model.weights.h5
+*.h5
+re_id_model/model/__pycache__/data_augmentations.cpython-311.pyc

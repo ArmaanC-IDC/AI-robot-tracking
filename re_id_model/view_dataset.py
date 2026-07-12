@@ -5,6 +5,8 @@ import cv2
 import matplotlib.pyplot as plt
 from keras import Sequential
 from keras.layers import RandomFlip, RandomRotation, RandomBrightness, RandomZoom, RandomTranslation,  RandomContrast
+from model.data_augmentations import augmenter
+import tensorflow as tf
 
 #note: selection method for data is different in real training
 
@@ -34,6 +36,7 @@ def get_data_generator(main_folder, batch_size=32, image_size=(128, 128)):
             for _ in range(batch_size):
                 if random.random() < 0.5:
                     robot = random.choice(robots)
+                    print(robot)
                     
                     img_a_path = random.choice(image_per_robot[robot])
                     img_b_path = random.choice(image_per_robot[robot])
@@ -44,6 +47,8 @@ def get_data_generator(main_folder, batch_size=32, image_size=(128, 128)):
                     robot_b = random.choice(robots)
                     while robot_a == robot_b:
                         robot_b = random.choice(robots)
+                    
+                    print(f"{robot_a}, {robot_b}")
 
                     img_a_path = random.choice(image_per_robot[robot_a])
 
@@ -73,46 +78,25 @@ def load_image(path, image_size):
     img = ((img / 127.5) - 1.0).astype(np.float32)
     return img
 
-gen = get_data_generator(folder_path, batch_size=8, image_size=(128, 128))
+gen = get_data_generator(folder_path, batch_size=1, image_size=(128, 128))
 
-# 2. Pull exactly one batch from the generator using next()
-(batch_a, batch_b), batch_labels = next(gen)
+while True:
+    (batch_a, batch_b), batch_labels = next(gen)
 
-# 3. Setup Matplotlib figure
-fig, axes = plt.subplots(8, 2, figsize=(8, 20))
-plt.subplots_adjust(wspace=0.1, hspace=0.4)
+    augmented_batch_a = augmenter(batch_a)
+    augmented_batch_b = augmenter(batch_b)
 
-augmenter = Sequential([
-    RandomFlip("horizontal"),
-    RandomRotation(0.1),
-    RandomBrightness(0.2, value_range=(-1, 1)),
-    RandomContrast(0.5, value_range=(-1, 1)),
-    RandomZoom(0.15),
-    RandomTranslation(height_factor=0.1, width_factor=0.1)
-])
+    img_a = augmented_batch_a[0]
+    img_b = augmented_batch_b[0]
 
-for i in range(8):
-    # A. The images are currently floats from -1.0 to 1.0. 
-    # We must un-normalize them back to 0-255 uint8 integers to view them.
-    batch_a[i] = augmenter(batch_a[i])
-    batch_b[i] = augmenter(batch_b[i])
+    display_img_a = ((img_a + 1.0) * 127.5).numpy().astype(np.uint8)
+    display_img_b = ((img_b + 1.0) * 127.5).numpy().astype(np.uint8)
 
-    img_a = ((batch_a[i] + 1.0) * 127.5).astype(np.uint8)
-    img_b = ((batch_b[i] + 1.0) * 127.5).astype(np.uint8)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
 
-    # B. Plot Image A
-    axes[i, 0].imshow(img_a)
-    axes[i, 0].axis('off')
-    axes[i, 0].set_title(f"Image A (Index {i})")
+    axes[0].imshow(display_img_a, interpolation='nearest') 
+    axes[1].imshow(display_img_b, interpolation='nearest') 
+    plt.axis('off')
+    # plt.suptitle(f"Label: {batch_labels[0]}", fontsize=16)
 
-    # C. Plot Image B and the Label
-    axes[i, 1].imshow(img_b)
-    axes[i, 1].axis('off')
-    
-    # label_val = batch_labels[i]
-    # label_text = "MATCH (1.0)" if label_val == 1.0 else "DIFFERENT (0.0)"
-    # color = "green" if label_val == 1.0 else "red"
-    
-    # axes[i, 1].set_title(f"Image B | {label_text}", color=color)
-
-plt.show()
+    plt.show()
