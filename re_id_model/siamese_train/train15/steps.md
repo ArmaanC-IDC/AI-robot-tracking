@@ -4,6 +4,19 @@ P and K of 4 (uses P/K sampling)
 
 no semi-hard triplet mining (find all triplets in each batch)
 
+Augmentations:
+augmenter = Sequential([
+    RandomFlip("horizontal"),
+    RandomRotation(0.15),
+    RandomBrightness(0.15, value_range=(-1, 1)),
+    RandomContrast(0.5, value_range=(-1, 1)),
+    RandomZoom(0.15),
+    RandomTranslation(height_factor=0.1, width_factor=0.1),
+    RandomGaussianBlur(0.1, value_range=(-1, 1)),
+    # RandomHue(factor=0.05),
+    RandomErasing(0.3)
+])
+
 Train dataset:
 {'10611_r': 27,
  '1114_r': 27,

@@ -11,13 +11,13 @@ import keras
 import os
 from model.data_augmentations import augmenter
 
-img1_path = "./dataset/val/2046_b/1.jpg"
-img2_paths = "./dataset/val/2046_b"
-img3_paths = "./dataset/val/4414_r"
+img1_path = "./dataset/new_frames/610_r/1.jpg"
+img2_paths = "./dataset/new_frames/610_r"
+img3_paths = "./dataset/new_frames/6865_r"
 
 image_shape = (128, 128, 3)
 
-MODEL_FILE = "siamese_train/train15/model.weights.h5"
+MODEL_FILE = "siamese_train/train16/model.weights.h5"
 
 base = MobileNetV2(weights="imagenet", include_top=False, input_shape=image_shape) #has 154 layers.
 base.trainable = False
@@ -25,8 +25,6 @@ base.trainable = False
 x = GlobalAveragePooling2D()(base.output)
 x = tf.keras.layers.Dropout(0.7)(x)
 x = Dense(128, activation="relu")(x)
-#TODO: Add more layers (look into)
-#TODO: Look into auto-encoder
 x = tf.keras.layers.UnitNormalization()(x)
 
 embedding_model = Model(base.input, x, name="embedding")

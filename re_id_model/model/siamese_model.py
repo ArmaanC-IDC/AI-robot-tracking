@@ -13,7 +13,7 @@ import os
 import csv
 from data_augmentations import augmenter
 
-filepath = "siamese_train/train15"
+filepath = "siamese_train/train16"
 
 dataset_filepath = "dataset"
 
@@ -79,7 +79,7 @@ x = GlobalAveragePooling2D()(base.output)
 x = tf.keras.layers.Dropout(0.7)(x)
 x = Dense(128, activation="relu")(x)
 #TODO: Add more layers (look into)
-#TODO: Look into auto-encoder
+#TODO: Look into auto-encoder (impractical because would have to train a new one for each robot)
 x = tf.keras.layers.UnitNormalization()(x)
 
 embedding_model = Model(base.input, x, name="embedding")
@@ -92,7 +92,7 @@ embedding = embedding_model(augmented)
 
 model = tfsim.models.SimilarityModel(input, embedding)
 
-# model.load_weights("siamese_train/train13" + "/model.weights.h5")
+model.load_weights("siamese_train/train15/model.weights.h5")
 
 # model = load_model(filepath + "/model.keras", compile=False, custom_objects={
 #     "dist": dist, 
@@ -208,8 +208,8 @@ def train_step(images, labels):
         embeddings = model(images, training=True)
         
         triplet_indices = tf.py_function(
-            func=mine_triplets, 
-            inp=[images, labels], 
+            func=mine_semi_hard_triplets, 
+            inp=[embeddings, labels], 
             Tout=tf.int32 
         )
 

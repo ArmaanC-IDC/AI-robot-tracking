@@ -4,7 +4,7 @@ import keras
 import tensorflow as tf
     
 
-#TODO: Review augmentations (ensure robots are still recognizable)
+#DONE: Review augmentations (ensure robots are still recognizable)
 #Faisal was right: many images were fully unrecognizable
 augmenter = Sequential([
     RandomFlip("horizontal"),

@@ -1,7 +1,7 @@
 import os
 import pprint
 
-dirs = ["./dataset/train"]
+dirs = ["./dataset/new_frames"]
 
 total_imgs = 0
 
