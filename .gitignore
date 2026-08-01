@@ -11,9 +11,10 @@ re_id_model/dataset/new_frames/*
 *.pt
 *.keras
 *.mp4
-*/__pycache__/*
+**/__pycache__/**
 
 */data.yaml
 re_id_model/notes.txt
 *.h5
 re_id_model/model/__pycache__/data_augmentations.cpython-311.pyc
+re-id-only-tracking/helper_scripts/__pycache__/build_model.cpython-311.pyc

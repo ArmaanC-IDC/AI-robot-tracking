@@ -4,12 +4,12 @@ from ultralytics import YOLO
 import cv2
 import numpy as np
 
-video_path = '../re_id_model/video-1.mp4'
+video_path = './video3.mp4'
 cap = cv2.VideoCapture(video_path)
 
 map_img = cv2.imread("full_field.png")
 
-start_seconds = 99
+start_seconds = 13
 end_seconds = 128
 frame_jump = 5
 
@@ -197,7 +197,7 @@ while cap.isOpened():
     #draw map points
     for track in current_tracks:
         for pt in track.prev_points:
-            cv2.circle(new_map_img, (pt[0], pt[1]), 4, track.color, -1)
+            cv2.circle(new_map_img, (pt[0], pt[1]), 10, track.color, -1)
         point = track.get_next_point(count)
         print(f"point: {point}, maxDist: {track.get_max_dist(count)}")
         cv2.circle(new_map_img, (int(point[0]), int(point[1])), int(track.get_max_dist(count)), (255, 0, 0))
