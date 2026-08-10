@@ -4,7 +4,7 @@ import numpy as np
 import os
 import ast
  
-videoPath = "./2026onwat_sf13m1.mp4"
+videoPath = "./2026onham_sf2m1.mp4"
 cap = cv2.VideoCapture(videoPath)
 video_fps = cap.get(cv2.CAP_PROP_FPS)
 
@@ -16,7 +16,7 @@ conf = 0.4
 iom = 0.5
 model = YOLO(model_path)
 
-teams = [610, 6865, 2200, 3756, 2702, 3683]
+teams = [6135, 6978, 9098, 9659, 4907, 5032]
 num_img_per_team = []
 
 # with open('transferPoints.txt', 'r') as f:

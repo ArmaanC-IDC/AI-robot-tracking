@@ -2,14 +2,14 @@ import os
 import shutil
 import random
 
-start = "./all_data"
+start = "../new_frames"
 
-end_locs = ["./train", "./val"]
+end_locs = ["../train", "../val"]
 split = [0.9, 0.1]
 
 for team_folder in os.listdir(start):
     for end in end_locs:
-        os.makedirs(os.path.join(end, team_folder))
+        os.makedirs(os.path.join(end, team_folder), exist_ok=True)
     
     for file in os.listdir(os.path.join(start, team_folder)):
         rand = random.random()

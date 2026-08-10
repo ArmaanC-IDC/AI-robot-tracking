@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['Robot']
+
+roboflow:
+  workspace: armaans-workspace-ulotm
+  project: armaans-workspace-ulotm
+  version: dataset
+  license: Private
+  url: https://app.roboflow.com/armaans-workspace-ulotm/armaans-workspace-ulotm/dataset

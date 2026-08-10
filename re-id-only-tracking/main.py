@@ -229,35 +229,36 @@ while cap.isOpened():
     for map_point in map_points:
         cv2.circle(new_map_img, (map_point[0], map_point[1]), 2, (0, 0, 255), -1)
 
+    print(frame)
     cv2.imshow("Scouting", frame)
     cv2.imshow("Positions", new_map_img)
 
     should_exit = False
-    # while True:
-    #     key = cv2.waitKey(0) & 0xFF
-    #     if key == 32:  #spacebar
-    #         for _ in range(frame_jump - 1):
-    #             cap.read()
+    while True:
+        key = cv2.waitKey(0) & 0xFF
+        if key == 32:  #spacebar
+            for _ in range(frame_jump - 1):
+                cap.read()
                 
-    #         count += frame_jump
-    #         break 
+            count += frame_jump
+            break 
             
-    #     elif key == ord("q"):
-    #         should_exit = True
-    #         break
+        elif key == ord("q"):
+            should_exit = True
+            break
 
-    for _ in range(frame_jump - 1):
-        cap.read()
+    # for _ in range(frame_jump - 1):
+    #     cap.read()
             
-        count += frame_jump
+    #     count += frame_jump
 
-    key = cv2.waitKey(1) & 0xFF
+    # key = cv2.waitKey(1) & 0xFF
         
-    if key == ord("q"):
-        should_exit = True
+    # if key == ord("q"):
+    #     should_exit = True
     
-    if should_exit:
-        break
+    # if should_exit:
+    #     break
     
 
 

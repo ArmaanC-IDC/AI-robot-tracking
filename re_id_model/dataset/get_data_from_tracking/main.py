@@ -6,8 +6,9 @@ import sys
 import os
 from scipy.optimize import linear_sum_assignment
 
-video_path = './2026cmptx_sf4m1.mp4'
+video_path = '../2026oncmp1_sf3m1.mp4'
 cap = cv2.VideoCapture(video_path)
+save_img_dir = '../new_frames'
 
 if not cap.isOpened() or cap.get(cv2.CAP_PROP_FPS)==0:
     print("Error: Could not open video.")
@@ -20,20 +21,21 @@ from ultralytics import YOLO
 
 map_img = cv2.imread("assets/full_field.png")
 
-start_seconds = 9
+start_seconds = 45
 end_seconds = 128
 frame_jump = 5
 
 yolo_model_path = '../best.pt'
-yolo_conf=0.3 #0.4 gives good results, 0.1 for testing
+yolo_conf=0.4 #0.4 gives good results
 yolo_iom=0.5
 yolo_model = YOLO(yolo_model_path)
 
-MODEL_FILEPATH = "./model.weights.h5"
+MODEL_FILEPATH = "../model.weights.h5"
 re_id_model = build_embedding_model(MODEL_FILEPATH)
 image_size = (128, 128)
 num_images_to_save_per_track = 12
 save_frequency = 10
+save_to_dataset_frequency = 20
 
 num_frames_considered_lost = 2 * frame_jump #number of frames track can go without detections before being considered lost
 
@@ -77,6 +79,19 @@ def process_image(img, image_size=(128, 128)):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = ((img / 127.5) - 1.0).astype(np.float32)
     return img
+
+def crop_with_padding(img, x1, x2, y1, y2, pad_ratio=0.10):
+    img_h, img_w = img.shape[:2]
+    
+    pad_w = int((x2 - x1) * pad_ratio)
+    pad_h = int((y2 - y1) * pad_ratio)
+    
+    nx1 = max(0, x1 - pad_w)
+    ny1 = max(0, y1 - pad_h)
+    nx2 = min(img_w, x2 + pad_w)
+    ny2 = min(img_h, y2 + pad_h)
+    
+    return img[ny1:ny2, nx1:nx2]
 
 def get_yolo_model():
     #map points is an array of points that robots occupy on the game map
@@ -145,8 +160,7 @@ def update_tracks(current_tracks, map_points, final_boxes):
 
             track = current_tracks[track_idx]
 
-            if len(points_claimed) == 0:
-                used_tracks.append(track_idx)
+            if len(points_claimed) == 0: continue
 
             if len(points_claimed) == 1 and len(point_claims[points_claimed[0]]) == 1:
                 track.add_point(map_points[points_claimed[0]], count)
@@ -166,7 +180,17 @@ def update_tracks(current_tracks, map_points, final_boxes):
     if len(unused_map_points) == 0: return
 
     assigned_embeddings = set()
-    crops = np.array([cv2.resize(frame[y1:y2, x1:x2], image_size) for x1, y1, x2, y2 in np.array(unused_boxes).astype(int)])
+    crops = np.array(
+        [
+            cv2.resize(
+                crop_with_padding(frame, x1, x2, y1, y2), 
+                image_size
+            ) 
+            for x1, y1, x2, y2 in np.array(unused_boxes).astype(int)
+            ]
+        )
+    
+
     embeddings = re_id_model.predict(np.array([process_image(crop) for crop in crops]), verbose=1)
     print(f"calculated {len(embeddings)} embeddings (association)")
 
@@ -214,7 +238,9 @@ def update_tracks(current_tracks, map_points, final_boxes):
         for e_idx, t_idx in zip(row_ind, col_ind):
             distance = cost_matrix[e_idx, t_idx]
 
-            if distance > 1.0 or e_idx >= num_points or t_idx >= num_tracks: continue
+            if distance > 1.0 or e_idx >= num_points or t_idx >= num_tracks: 
+                if distance > 1.0: print(f"continuing. Dist: {distance}")
+                continue
 
 
             assigned_embeddings.add(e_idx)
@@ -275,9 +301,21 @@ while cap.isOpened():
 
     final_boxes, map_points, final_confidences = get_yolo_model()
 
+    if len(final_boxes) == 0: 
+        print("no detections")
+        continue
+
     #initialize tracks
     if count==int(video_fps * start_seconds):
-        crops = np.array([cv2.resize(frame[y1:y2, x1:x2], image_size) for x1, y1, x2, y2 in np.array(final_boxes).astype(int)])
+        crops = np.array(
+            [
+                cv2.resize(
+                    crop_with_padding(frame, x1, x2, y1, y2), 
+                    image_size
+                ) 
+                for x1, y1, x2, y2 in np.array(final_boxes).astype(int)
+            ]
+        )
         embeddings = re_id_model.predict(np.array([process_image(crop) for crop in crops]), verbose=1)
         print(f"calculated {len(embeddings)} embeddings (initialization)")
         current_tracks = [Track(
@@ -307,7 +345,7 @@ while cap.isOpened():
                 ):
                     pt_idx = [idx for idx, pt in enumerate(map_points) if np.array_equal(pt, current_tracks[i].get_points()[-1])][0]
                     x1, y1, x2, y2 = map(int, final_boxes[pt_idx])
-                    crops.append(cv2.resize(frame[y1:y2, x1:x2], image_size))
+                    crops.append(cv2.resize(crop_with_padding(frame, x1, x2, y1, y2), image_size))
                     tracks_needing_embeddings.append(i)
 
             if len(crops) > 0:
@@ -317,12 +355,14 @@ while cap.isOpened():
                 for i, t_idx in enumerate(tracks_needing_embeddings):
                     current_tracks[t_idx].add_embedding(embeddings[i], count)
 
+    display_frame = frame.copy()
+
     #draw boxes
     for box, conf1 in zip(final_boxes, final_confidences):
         x1, y1, x2, y2 = map(int, box) 
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
         label = f"{conf1:.2f}"
-        cv2.putText(frame, label, (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(display_frame, label, (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     #draw map points
     for track in current_tracks:
@@ -334,13 +374,30 @@ while cap.isOpened():
     for map_point in map_points:
         cv2.circle(new_map_img, (map_point[0], map_point[1]), 2, (0, 0, 255), -1)
 
-    cv2.imshow("Scouting", frame)
+    cv2.imshow("Scouting", display_frame)
     cv2.imshow("Positions", new_map_img)
 
     should_exit = False
     while True:
         key = cv2.waitKey(0) & 0xFF
         if key == 32:  #spacebar
+            if (count - start_frame) % save_to_dataset_frequency == 0:
+                for track_i, track in enumerate(current_tracks):
+                    if track.get_point_times()[-1] != count: continue
+
+                    point = track.get_points()[-1]
+                    pt_idx = [idx for idx, pt in enumerate(map_points) if np.array_equal(pt, point)][0]
+                    x1, y1, x2, y2 = np.array(final_boxes[pt_idx]).astype(int)
+                    crop = cv2.resize(crop_with_padding(frame, x1, x2, y1, y2), image_size)
+
+                    os.makedirs(f"{save_img_dir}/{track_i}", exist_ok=True)
+                    image_count = sum(
+                        1 for f in os.listdir(f"{save_img_dir}/{track_i}") 
+                        if f.lower().endswith('.jpg') 
+                        and os.path.isfile(os.path.join(f"{save_img_dir}/{track_i}", f))
+                    )
+                    cv2.imwrite(f"{save_img_dir}/{track_i}/{image_count}.jpg", crop)
+
             for _ in range(frame_jump - 1):
                 cap.read()
                 
@@ -349,6 +406,7 @@ while cap.isOpened():
             
         elif key == ord("q"):
             should_exit = True
+            print(f"Quitting at frame {count}, or {count/video_fps}s")
             break
     
     if should_exit:

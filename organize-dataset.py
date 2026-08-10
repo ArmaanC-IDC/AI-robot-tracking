@@ -3,8 +3,8 @@ import shutil
 from sklearn.model_selection import train_test_split
 
 # --- CONFIGURATION ---
-raw_img_dir = "unsorted/valid/images"   # Your current folder with only images
-raw_lbl_dir = "unsorted/valid/labels"   # Your current folder with only .txt files
+raw_img_dir = "C:/Users/achandarana/Downloads/FRC Robot Detector.v9i.yolo26/train/images"   # Your current folder with only images
+raw_lbl_dir = "C:/Users/achandarana/Downloads/FRC Robot Detector.v9i.yolo26/train/labels"   # Your current folder with only .txt files
 output_root = "training_data"
 split_ratio = (0.8, 0.1, 0.1) # Train, Val, Test
 
