@@ -17,14 +17,16 @@ class Track:
     px_to_m = 570 / 16.54
 
     #20px to account for errors in drawing the bounding boxes
-    min_circle_radius = 30
+    min_circle_radius = 40
 
-    max_accel = 5 #in m/s^2
+    max_accel = 140 #in m/s^2
     max_vel = 5 #in m/s
 
     fps = 0
 
     num_images_to_compare_to = 5
+
+    velocity_smoothing_factor = 0.5
 
     def __init__(self, color, embeddings, id, fps=None):
         self.color = color
@@ -38,6 +40,8 @@ class Track:
         self.points = []
         self.point_times = []
         self.images = []
+
+        self.prev_vel = 0
     
     def add_point(self, point, time, include_embedding=False, embedding=None):
         self.points.append(point)
@@ -83,7 +87,12 @@ class Track:
         if len(self.points)==2:
             return (self.points[-1] - self.points[-2]) / (self.point_times[-1] - self.point_times[-2])
         
-        return (self.points[-2] - self.points[-3]) / (self.point_times[-2] - self.point_times[-3])
+        v_raw = (self.points[-2] - self.points[-3]) / (self.point_times[-2] - self.point_times[-3])
+
+        new_v = Track.velocity_smoothing_factor * v_raw + (1 - Track.velocity_smoothing_factor) * self.prev_vel
+        self.prev_vel = new_v
+
+        return new_v
     
     def get_next_point(self, frame):
         if len(self.points) == 0:

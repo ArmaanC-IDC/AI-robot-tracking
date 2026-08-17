@@ -10,11 +10,11 @@ from tensorflow.keras.layers import Input, Dense, GlobalAveragePooling2D, Dropou
 from tensorflow.keras.models import Model
 import tensorflow_similarity as tfsim
 
-#Train got 68.8096% accuracy when measuring the mean, and 94.5756% when measuring the closest
-#Validation got 59.5652% accuracy when measuring the mean, and 84.7826% when measuring the closest
-#New frames got 48.9362% accuracy when measuring the mean, and 82.9787% accuracy when measuring the closest
+#Train got 68.8096% accuracy when measuring the mean, and 95.0930% when measuring the closest
+#Validation got 59.5652% accuracy when measuring the mean, and 92.0308% when measuring the closest
+#New frames got 48.9362% accuracy when measuring the mean, and 90.1639% accuracy when measuring the closest
 
-MODEL_FILEPATH = "./siamese_train/train16/model.weights.h5"
+MODEL_FILEPATH = "./siamese_train/train18/model.weights.h5"
 DATASET_FILEPATH = "./dataset/new_frames"
 IMAGE_SHAPE = (128, 128, 3)
 BATCH_SIZE = 16

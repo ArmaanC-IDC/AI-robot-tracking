@@ -13,7 +13,7 @@ import os
 import csv
 from data_augmentations import augmenter
 
-filepath = "siamese_train/train16"
+filepath = "siamese_train/train18"
 
 dataset_filepath = "dataset"
 
@@ -92,7 +92,7 @@ embedding = embedding_model(augmented)
 
 model = tfsim.models.SimilarityModel(input, embedding)
 
-model.load_weights("siamese_train/train15/model.weights.h5")
+model.load_weights("siamese_train/train17/model.weights.h5")
 
 # model = load_model(filepath + "/model.keras", compile=False, custom_objects={
 #     "dist": dist, 

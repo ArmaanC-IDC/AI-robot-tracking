@@ -6,7 +6,7 @@ import sys
 import os
 from scipy.optimize import linear_sum_assignment
 
-video_path = '../2026oncmp1_sf3m1.mp4'
+video_path = '../2024oncmp_f1m1.mp4'
 cap = cv2.VideoCapture(video_path)
 save_img_dir = '../new_frames'
 
@@ -21,12 +21,12 @@ from ultralytics import YOLO
 
 map_img = cv2.imread("assets/full_field.png")
 
-start_seconds = 45
+start_seconds = 44
 end_seconds = 128
 frame_jump = 5
 
-yolo_model_path = '../best.pt'
-yolo_conf=0.4 #0.4 gives good results
+yolo_model_path = '../best (8).pt'
+yolo_conf=0.1
 yolo_iom=0.5
 yolo_model = YOLO(yolo_model_path)
 
@@ -35,9 +35,9 @@ re_id_model = build_embedding_model(MODEL_FILEPATH)
 image_size = (128, 128)
 num_images_to_save_per_track = 12
 save_frequency = 10
-save_to_dataset_frequency = 20
+save_to_dataset_frequency = 1
 
-num_frames_considered_lost = 2 * frame_jump #number of frames track can go without detections before being considered lost
+num_frames_considered_lost = 5 * frame_jump #number of frames track can go without detections before being considered lost
 
 scouter = FrameToPoints(
     points_path='transferPoints.txt',
@@ -238,9 +238,14 @@ def update_tracks(current_tracks, map_points, final_boxes):
         for e_idx, t_idx in zip(row_ind, col_ind):
             distance = cost_matrix[e_idx, t_idx]
 
-            if distance > 1.0 or e_idx >= num_points or t_idx >= num_tracks: 
-                if distance > 1.0: print(f"continuing. Dist: {distance}")
+            if e_idx >= num_points or t_idx >= num_tracks:
                 continue
+
+            if distance > 1.0:
+                print(f"continuing. Dist: {distance}")
+                continue
+            else:
+                print(f"Matched with distance {distance}")
 
 
             assigned_embeddings.add(e_idx)
@@ -292,6 +297,7 @@ while cap.isOpened():
         break
 
     success, frame = cap.read()
+    frame = cv2.resize(frame, (1280, 720))
     if not success: 
         print("End of video stream reached.")
         break
@@ -366,8 +372,8 @@ while cap.isOpened():
 
     #draw map points
     for track in current_tracks:
-        for pt in track.get_points():
-            cv2.circle(new_map_img, (pt[0], pt[1]), 10, track.color, -1)
+        for pt in track.get_points()[-10:]:
+            cv2.circle(new_map_img, (pt[0], pt[1]), 5, track.color, -1)
         point = track.get_next_point(count)
         cv2.circle(new_map_img, (int(point[0]), int(point[1])), int(track.get_max_dist(count)), (255, 0, 0))
     

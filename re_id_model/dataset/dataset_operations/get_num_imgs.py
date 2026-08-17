@@ -1,7 +1,7 @@
 import os
 import pprint
 
-dirs = ["../val"]
+dirs = ["./dataset//val"]
 
 total_imgs = 0
 

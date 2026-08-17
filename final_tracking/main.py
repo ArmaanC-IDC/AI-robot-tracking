@@ -20,13 +20,13 @@ from ultralytics import YOLO
 
 map_img = cv2.imread("assets/full_field.png")
 
-start_seconds = 9
+start_seconds = 0
 end_seconds = 128
-frame_jump = 5
+frame_jump = 10
 
-yolo_model_path = '../best.pt'
-yolo_conf=0.3 #0.4 gives good results, 0.1 for testing
-yolo_iom=0.5
+yolo_model_path = './best.pt'
+yolo_conf=0.4
+yolo_iom=0.2
 yolo_model = YOLO(yolo_model_path)
 
 MODEL_FILEPATH = "./model.weights.h5"
@@ -35,16 +35,18 @@ image_size = (128, 128)
 num_images_to_save_per_track = 12
 save_frequency = 10
 
-num_frames_considered_lost = 2 * frame_jump #number of frames track can go without detections before being considered lost
-
-scouter = FrameToPoints(
-    points_path='transferPoints.txt',
-)
-
 video_fps = cap.get(cv2.CAP_PROP_FPS)
 start_frame = int(video_fps * start_seconds)
 count = start_frame
 end_frame = int(video_fps * end_seconds)
+
+num_frames_considered_lost = 1 * video_fps #number of frames track can go without detections before being considered lost
+weight_re_id = 0.5 #when matching using visual features, the weight assigned to the re-id model score (rest is assigned based on time since last detection)
+max_time_since_last_detection = 3 * video_fps
+
+scouter = FrameToPoints(
+    points_path='transferPoints.txt',
+)
 
 def IoM(boxes, confidences, threshhold):
     idxs = np.argsort(confidences)[::-1]
@@ -77,6 +79,19 @@ def process_image(img, image_size=(128, 128)):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = ((img / 127.5) - 1.0).astype(np.float32)
     return img
+
+def crop_with_padding(img, x1, x2, y1, y2, pad_ratio=0.10):
+    img_h, img_w = img.shape[:2]
+    
+    pad_w = int((x2 - x1) * pad_ratio)
+    pad_h = int((y2 - y1) * pad_ratio)
+    
+    nx1 = max(0, x1 - pad_w)
+    ny1 = max(0, y1 - pad_h)
+    nx2 = min(img_w, x2 + pad_w)
+    ny2 = min(img_h, y2 + pad_h)
+    
+    return img[ny1:ny2, nx1:nx2]
 
 def get_yolo_model():
     #map points is an array of points that robots occupy on the game map
@@ -145,8 +160,7 @@ def update_tracks(current_tracks, map_points, final_boxes):
 
             track = current_tracks[track_idx]
 
-            if len(points_claimed) == 0:
-                used_tracks.append(track_idx)
+            if len(points_claimed) == 0: continue
 
             if len(points_claimed) == 1 and len(point_claims[points_claimed[0]]) == 1:
                 track.add_point(map_points[points_claimed[0]], count)
@@ -166,7 +180,17 @@ def update_tracks(current_tracks, map_points, final_boxes):
     if len(unused_map_points) == 0: return
 
     assigned_embeddings = set()
-    crops = np.array([cv2.resize(frame[y1:y2, x1:x2], image_size) for x1, y1, x2, y2 in np.array(unused_boxes).astype(int)])
+    crops = np.array(
+        [
+            cv2.resize(
+                crop_with_padding(frame, x1, x2, y1, y2), 
+                image_size
+            ) 
+            for x1, y1, x2, y2 in np.array(unused_boxes).astype(int)
+            ]
+        )
+    
+
     embeddings = re_id_model.predict(np.array([process_image(crop) for crop in crops]), verbose=1)
     print(f"calculated {len(embeddings)} embeddings (association)")
 
@@ -193,12 +217,9 @@ def update_tracks(current_tracks, map_points, final_boxes):
                 if e_idx in track_claims[t_idx] and t_idx in point_claims[e_idx]:
                     min_dist = track.get_distance(embedding) 
 
-                    #multiplier penalizes assigning to tracks that have not been found for less than 50% of the time they have existed
-                    first_detected = track.point_times[0] if len(track.point_times) > 0 else count
-                    percent_detections = len(track.point_times) / ((count - first_detected) / frame_jump) if first_detected != count else 0
-                    multiplier = 2 if percent_detections < 0.5 else 1
+                    time_since_last_found = count - track.point_times[-1]
                     
-                    cost_matrix[e_idx, t_idx] = min_dist * multiplier
+                    cost_matrix[e_idx, t_idx] = (min_dist * weight_re_id) + min(time_since_last_found / max_time_since_last_detection, 1) * (1 - weight_re_id)
 
         #expand the cost matrix to have dummy rows and columns
         h_dummy_block = np.full((num_points, num_points), 1e5)
@@ -214,7 +235,15 @@ def update_tracks(current_tracks, map_points, final_boxes):
         for e_idx, t_idx in zip(row_ind, col_ind):
             distance = cost_matrix[e_idx, t_idx]
 
-            if distance > 1.0 or e_idx >= num_points or t_idx >= num_tracks: continue
+            if e_idx >= num_points or t_idx >= num_tracks:
+                continue
+
+            if distance > 1.0:
+                print(f"continuing ({unused_tracks[t_idx].color}). Dist: {distance}")
+                continue
+            else:
+                print(f"Matched ({unused_tracks[t_idx].color}) with distance {distance}.")
+                print(f" -> Time weight: {min((count - unused_tracks[t_idx].point_times[-1]) / max_time_since_last_detection, 1)}")
 
 
             assigned_embeddings.add(e_idx)
@@ -260,12 +289,13 @@ for _ in range(count):
     cap.read()
 
 while cap.isOpened():
-    print("New--------------------------------")
+    print(f"New {count/video_fps:.2f}--------------------------------")
     if count >= end_frame:
         print("Done")
         break
 
     success, frame = cap.read()
+    frame = cv2.resize(frame, (1280, 720))
     if not success: 
         print("End of video stream reached.")
         break
@@ -275,9 +305,21 @@ while cap.isOpened():
 
     final_boxes, map_points, final_confidences = get_yolo_model()
 
+    if len(final_boxes) == 0: 
+        print("no detections")
+        continue
+
     #initialize tracks
     if count==int(video_fps * start_seconds):
-        crops = np.array([cv2.resize(frame[y1:y2, x1:x2], image_size) for x1, y1, x2, y2 in np.array(final_boxes).astype(int)])
+        crops = np.array(
+            [
+                cv2.resize(
+                    crop_with_padding(frame, x1, x2, y1, y2), 
+                    image_size
+                ) 
+                for x1, y1, x2, y2 in np.array(final_boxes).astype(int)
+            ]
+        )
         embeddings = re_id_model.predict(np.array([process_image(crop) for crop in crops]), verbose=1)
         print(f"calculated {len(embeddings)} embeddings (initialization)")
         current_tracks = [Track(
@@ -305,9 +347,9 @@ while cap.isOpened():
                     and not current_tracks[i].embedding_added_on_frame(count)
                     and current_tracks[i].point_times[-1]==count
                 ):
-                    pt_idx = [idx for idx, pt in enumerate(map_points) if np.array_equal(pt, current_tracks[i].get_points()[-1])][0]
+                    pt_idx = [idx for idx, pt in enumerate(map_points) if pt is current_tracks[i].get_points()[-1]][0]
                     x1, y1, x2, y2 = map(int, final_boxes[pt_idx])
-                    crops.append(cv2.resize(frame[y1:y2, x1:x2], image_size))
+                    crops.append(cv2.resize(crop_with_padding(frame, x1, x2, y1, y2), image_size))
                     tracks_needing_embeddings.append(i)
 
             if len(crops) > 0:
@@ -317,44 +359,73 @@ while cap.isOpened():
                 for i, t_idx in enumerate(tracks_needing_embeddings):
                     current_tracks[t_idx].add_embedding(embeddings[i], count)
 
+    display_frame = frame.copy()
+
     #draw boxes
     for box, conf1 in zip(final_boxes, final_confidences):
         x1, y1, x2, y2 = map(int, box) 
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
         label = f"{conf1:.2f}"
-        cv2.putText(frame, label, (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(display_frame, label, (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     #draw map points
     for track in current_tracks:
-        for pt in track.get_points():
+        for pt in track.get_points()[-10:]:
             cv2.circle(new_map_img, (pt[0], pt[1]), 10, track.color, -1)
         point = track.get_next_point(count)
-        cv2.circle(new_map_img, (int(point[0]), int(point[1])), int(track.get_max_dist(count)), (255, 0, 0))
+        cv2.circle(new_map_img, (int(point[0]), int(point[1])), int(track.get_max_dist(count)), track.color)
+
+    #draw latest map points
+    for track in current_tracks:
+        for pt in track.get_points()[-1:]:
+            cv2.circle(new_map_img, (pt[0], pt[1]), 10, track.color, -1)
+        point = track.get_next_point(count)
     
     for map_point in map_points:
         cv2.circle(new_map_img, (map_point[0], map_point[1]), 2, (0, 0, 255), -1)
 
-    cv2.imshow("Scouting", frame)
+    cv2.imshow("Scouting", display_frame)
     cv2.imshow("Positions", new_map_img)
 
     should_exit = False
-    while True:
-        key = cv2.waitKey(0) & 0xFF
-        if key == 32:  #spacebar
-            for _ in range(frame_jump - 1):
-                cap.read()
+    # while True:
+    #     key = cv2.waitKey(0) & 0xFF
+    #     if key == 32:  #spacebar
+    #         for _ in range(frame_jump - 1):
+    #             cap.read()
                 
-            count += frame_jump
-            break 
+    #         count += frame_jump
+    #         break 
             
-        elif key == ord("q"):
-            should_exit = True
-            break
+    #     elif key == ord("q"):
+    #         should_exit = True
+    #         print(f"Quitting at frame {count}, or {count/video_fps}s")
+    #         break
+
+    key = cv2.waitKey(1) & 0xFF        
+    if key == ord("q"):
+        should_exit = True
+        print(f"Quitting at frame {count}, or {count/video_fps}s")
+        break
     
     if should_exit:
         break
     
+    for i in range(len(current_tracks)):
+        if len(current_tracks[i].point_times)==0:
+            continue
+        if current_tracks[i].point_times[-1]==count:
+            pt_idx = [idx for idx, pt in enumerate(map_points) if pt is current_tracks[i].get_points()[-1]][0]
+            x1, y1, x2, y2 = map(int, final_boxes[pt_idx])
+            crop = cv2.resize(crop_with_padding(frame, x1, x2, y1, y2), image_size)
 
+            os.makedirs(f"./{i}", exist_ok=True)
+            cv2.imwrite(f"./{i}/{count/video_fps:.2f}_{i}.jpg", crop)
+
+    for _ in range(frame_jump - 1):
+        cap.read()
+        
+    count += frame_jump
 
 cap.release()
 cv2.destroyAllWindows()

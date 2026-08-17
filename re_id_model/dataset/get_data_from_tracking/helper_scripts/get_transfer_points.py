@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 TARGET_FRAME = 500
-video_path = '../2026oncmp1_sf3m1.mp4'
+video_path = '../2024oncmp_f1m1.mp4'
 map_img = cv2.imread('./assets/full_field.png')
 # map_img = cv2.rotate(map_img, cv2.ROTATE_180)
 
@@ -19,7 +19,9 @@ def click_event(event, x, y, flags, param):
 cap = cv2.VideoCapture(video_path)
 cap.set(cv2.CAP_PROP_POS_FRAMES, TARGET_FRAME)
 _, frame = cap.read()
+frame = cv2.resize(frame, (1280, 720))
 _, frame2 = cap.read()
+frame2 = cv2.resize(frame, (1280, 720))
 cap.release()
 
 cv2.imshow("Window", frame)

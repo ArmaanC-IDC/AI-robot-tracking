@@ -2,7 +2,7 @@ import os
 import shutil
 import random
 
-start = "../new_frames"
+start = "../all_data"
 
 end_locs = ["../train", "../val"]
 split = [0.9, 0.1]

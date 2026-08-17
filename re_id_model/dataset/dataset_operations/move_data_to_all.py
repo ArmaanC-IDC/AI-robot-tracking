@@ -1,7 +1,7 @@
 import os
 import shutil
 
-folders = ["./new_frames"]
+folders = ["./val", "./train"]
 
 end_loc = "./all_data"
 

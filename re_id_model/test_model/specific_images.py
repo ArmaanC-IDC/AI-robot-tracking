@@ -1,3 +1,15 @@
+import os
+import sys
+
+# current_dir = os.path.dirname(os.path.abspath(__file__))
+# parent_dir = os.path.dirname(current_dir)
+# sys.path.append(parent_dir)
+
+# from model.data_augmentations import augmenter
+
+import numpy as np
+import cv2
+
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 import tensorflow.keras.backend as K
@@ -5,19 +17,15 @@ from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.layers import Input, Dense, GlobalAveragePooling2D
 from tensorflow.keras.models import Model
 import tensorflow_similarity as tfsim
-import numpy as np
-import cv2
 import keras
-import os
-from model.data_augmentations import augmenter
 
-img1_path = "./dataset/new_frames/610_r/1.jpg"
-img2_paths = "./dataset/new_frames/610_r"
-img3_paths = "./dataset/new_frames/6865_r"
+img1_path = "./image (2).png"
+img2_paths = "./img2paths"
+img3_paths = "./img3paths"
 
 image_shape = (128, 128, 3)
 
-MODEL_FILE = "siamese_train/train16/model.weights.h5"
+MODEL_FILE = "../siamese_train/train16/model.weights.h5"
 
 base = MobileNetV2(weights="imagenet", include_top=False, input_shape=image_shape) #has 154 layers.
 base.trainable = False
@@ -31,9 +39,9 @@ embedding_model = Model(base.input, x, name="embedding")
 
 input = Input(shape=(128, 128, 3), name="input")
 
-augmented = augmenter(input)
+# augmented = augmenter(input)
 
-embedding = embedding_model(augmented)
+embedding = embedding_model(input)
 
 model = tfsim.models.SimilarityModel(input, embedding)
 
@@ -70,12 +78,12 @@ img1 = preprocess_image(img1_path)
 emb1 = embedding_extractor.predict(img1, verbose=0)
 
 img2_embeddings = [embedding_extractor.predict(preprocess_image(os.path.join(img2_paths, f)))
-                    for f in os.listdir(img2_paths) if f.lower().endswith('.jpg')]
+                    for f in os.listdir(img2_paths) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
 
 img2_dists = [np.linalg.norm(emb - emb1) for emb in img2_embeddings if np.linalg.norm(emb - emb1) != 0]
 
 img3_embeddings = [embedding_extractor.predict(preprocess_image(os.path.join(img3_paths, f)))
-                    for f in os.listdir(img3_paths) if f.lower().endswith('.jpg')]
+                    for f in os.listdir(img3_paths) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
 
 img3_dists = [np.linalg.norm(emb - emb1) for emb in img3_embeddings if np.linalg.norm(emb - emb1) != 0]
 

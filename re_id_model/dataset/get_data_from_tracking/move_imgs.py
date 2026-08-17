@@ -1,8 +1,11 @@
 import os
 import shutil
 
-start_dirs = ['../new_frames/0', '../new_frames/1', '../new_frames/2', '../new_frames/3', '../new_frames/4', '../new_frames/5', '../new_frames/6']
-end_dirs = ['../new_frames/1323_r', '../new_frames/4946_b', '../new_frames/6324_b', '../new_frames/2337_b', '../new_frames/1323_r', '../new_frames/4065_r', '../new_frames/4414_r']
+# start_dirs = ['../new_frames/0', '../new_frames/1', '../new_frames/2', '../new_frames/3', '../new_frames/4', '../new_frames/5', '../new_frames/6']
+# end_dirs = ['../new_frames/2024_8729_b', '../new_frames/2024_9785_r', '../new_frames/2024_4039_b', '../new_frames/2024_4476_b', '../new_frames/2024_2056_r', '../new_frames/2024_4678_r', '../new_frames/2024_2056_b']
+
+start_dirs = ['../new_frames/2024_2056_b']
+end_dirs = ['../new_frames/2024_2056_r']
 
 for src_dir, dest_dir in zip(start_dirs, end_dirs):
     # Skip if the source directory doesn't exist

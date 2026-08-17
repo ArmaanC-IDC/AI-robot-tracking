@@ -16,8 +16,8 @@ import tensorflow_similarity as tfsim
 #Val: 729, 257, 210, 949
 #New Frames: 123, 107, 57, 178
 
-MODEL_FILEPATH = "./siamese_train/train16/model.weights.h5"
-DATASET_FILEPATH = "./dataset/new_frames"
+MODEL_FILEPATH = "./siamese_train/train18/model.weights.h5"
+DATASET_FILEPATH = "./dataset/val"
 IMAGE_SHAPE = (128, 128, 3)
 BATCH_SIZE = 16
 
