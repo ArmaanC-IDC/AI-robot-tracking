@@ -19,8 +19,8 @@ class Track:
     #account for errors in drawing the bounding boxes
     min_circle_radius = 30
 
-    max_accel = 10 #in m/s^2
-    max_vel = 10 #in m/s
+    max_accel = 14 #in m/s^2
+    max_vel = 6 #in m/s
 
     fps = 0
 
@@ -81,47 +81,47 @@ class Track:
                 
         return np.mean(np.array([-x for x in max_heap]))
 
-    def get_current_vel(self):
-        if len(self.points) < 2 or self.point_times[-1] - self.point_times[-2] == 0:
-            return np.array([0, 0])
-        if len(self.points)==2:
-            return (self.points[-1] - self.points[-2]) / (self.point_times[-1] - self.point_times[-2])
+    def get_current_vel(self, frame_num, use_for_dist=False):
+        #if cannot find velocity (first point or has been lost for half second or more), 
+        # assume max velocity for distance and 0 velocity for point
+        if len(self.points)==0 or frame_num - self.point_times[-1] > Track.fps * 0.5:
+            return np.array([Track.max_vel, 0]) if use_for_dist else np.array([0, 0])
         
-        v_raw = (self.points[-2] - self.points[-3]) / (self.point_times[-2] - self.point_times[-3])
+        #if can't calculate velocity normally, return 0
+        if len(self.points) < 2 or self.point_times[-1] - self.point_times[-2] == 0:
+            return np.array([0.0, 0.0])
+        
+        #normally, calculate the velocity        
+        current_vel = (self.points[-1] - self.points[-2]) / (self.point_times[-1] - self.point_times[-2])
+        final_vel = current_vel * (1 - self.velocity_smoothing_factor) + self.prev_vel * self.velocity_smoothing_factor
+        self.prev_vel = final_vel
 
-        new_v = Track.velocity_smoothing_factor * v_raw + (1 - Track.velocity_smoothing_factor) * self.prev_vel
-        self.prev_vel = new_v
-
-        return new_v
+        return final_vel
     
-    def get_next_point(self, frame):
+    def get_next_point(self, frame_num):
         if len(self.points) == 0:
             print("Error: track.py get_next_point called before any points added")
-            stack_history = inspect.stack()[:5]
-            for frame in stack_history:
-                print(f"  -> {frame.function} in {frame.filename}:{frame.lineno}")
 
             return np.array([0, 0])
 
-        if len(self.points) <= 2:
+        if len(self.points) < 2:
             return self.points[-1]
         
-        return self.points[-1] + (self.get_current_vel() * (frame - self.point_times[-1]))
+        return self.points[-1] + (self.get_current_vel(frame_num) * (frame_num - self.point_times[-1]))
     
-    def get_max_dist(self, frame):
+    def get_max_dist(self, frame_num):
         if len(self.points) == 0:
             print("Error: track.py get_next_point called before any points added")
-            stack_history = inspect.stack()[:5]
-            for frame in stack_history:
-                print(f"  -> {frame.function} in {frame.filename}:{frame.lineno}")
             return Track.min_circle_radius
         
-        dt = (frame - self.point_times[-1])
+        vel = self.get_current_vel(frame_num, True)
+        
+        dt = (frame_num - self.point_times[-1])
 
         #acceleration in px/frame^2
         a = (self.max_accel * self.px_to_m) / (self.fps**2)
 
         return max(min(
-            np.linalg.norm(self.get_current_vel()*dt + 0.5*a*(dt**2)), #assuming max acceleration
+            np.linalg.norm(vel)*dt + 0.5*a*(dt**2), #assuming max acceleration
             ((self.px_to_m * self.max_vel) / self.fps) * dt #assuming max velocity
         ), Track.min_circle_radius)

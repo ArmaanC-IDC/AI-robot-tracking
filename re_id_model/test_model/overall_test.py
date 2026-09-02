@@ -14,8 +14,9 @@ import tensorflow_similarity as tfsim
 #Validation got 59.5652% accuracy when measuring the mean, and 92.0308% when measuring the closest
 #New frames got 48.9362% accuracy when measuring the mean, and 90.1639% accuracy when measuring the closest
 
-MODEL_FILEPATH = "./siamese_train/train18/model.weights.h5"
-DATASET_FILEPATH = "./dataset/new_frames"
+# MODEL_FILEPATH = "./siamese_train/train18/model.weights.h5"
+MODEL_FILEPATH = "./to_test.weights.h5"
+DATASET_FILEPATH = "./dataset/val"
 IMAGE_SHAPE = (128, 128, 3)
 BATCH_SIZE = 16
 NUM_CLASSES_TO_TEST_AGAINST = 5 #test against the same class and X others

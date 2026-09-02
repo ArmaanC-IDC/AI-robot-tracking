@@ -13,10 +13,9 @@ from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.layers import Input, Dense, GlobalAveragePooling2D
 from tensorflow.keras.models import Model
 import tensorflow_similarity as tfsim
-from model.data_augmentations import augmenter
 
-model_filepath = "./siamese_train/train16"
-dataset_filepath = "./dataset/new_frames"
+model_filepath = "./"
+dataset_filepath = "./dataset/val"
 
 image_shape = (128, 128, 3)
 
@@ -33,13 +32,11 @@ embedding_model = Model(base.input, x, name="embedding")
 
 input = Input(shape=(128, 128, 3), name="input")
 
-augmented = augmenter(input)
-
-embedding = embedding_model(augmented)
+embedding = embedding_model(input)
 
 model = tfsim.models.SimilarityModel(input, embedding)
 
-model.load_weights(model_filepath + "/model.weights.h5")
+model.load_weights(model_filepath + "/to_test.weights.h5")
 
 def load(image_path, target_size=(128, 128)):    
     img = cv2.imread(image_path)

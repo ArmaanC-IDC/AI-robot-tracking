@@ -6,7 +6,7 @@ import sys
 import os
 from scipy.optimize import linear_sum_assignment
 
-video_path = './2026cmptx_sf4m1.mp4'
+video_path = '././2026ontor_sf1m1.mp4'
 cap = cv2.VideoCapture(video_path)
 
 if not cap.isOpened() or cap.get(cv2.CAP_PROP_FPS)==0:
@@ -17,16 +17,17 @@ from helper_scripts.build_model import build_embedding_model
 from helper_scripts.frame_to_points import FrameToPoints
 from helper_scripts.track import Track
 from ultralytics import YOLO
+import time
 
 map_img = cv2.imread("assets/full_field.png")
 
-start_seconds = 0
+start_seconds = 7
 end_seconds = 128
-frame_jump = 10
+frame_jump = 5
 
 yolo_model_path = './best.pt'
-yolo_conf=0.4
-yolo_iom=0.2
+yolo_conf=0.3
+yolo_iom=0.1
 yolo_model = YOLO(yolo_model_path)
 
 MODEL_FILEPATH = "./model.weights.h5"
@@ -38,15 +39,27 @@ save_frequency = 10
 video_fps = cap.get(cv2.CAP_PROP_FPS)
 start_frame = int(video_fps * start_seconds)
 count = start_frame
+print(count)
 end_frame = int(video_fps * end_seconds)
 
 num_frames_considered_lost = 1 * video_fps #number of frames track can go without detections before being considered lost
-weight_re_id = 0.5 #when matching using visual features, the weight assigned to the re-id model score (rest is assigned based on time since last detection)
+weight_re_id = 0.6 #when matching using visual features, the weight assigned to the re-id model score (rest is assigned based on time since last detection)
 max_time_since_last_detection = 3 * video_fps
 
 scouter = FrameToPoints(
     points_path='transferPoints.txt',
 )
+
+times = {
+    "per_frame": [],
+    "before_yolo": [],
+    "yolo": [],
+    "tier_1_update": [],
+    "tier_2_update": [],
+    "draw_images": [],
+    "save_images": []
+}
+
 
 def IoM(boxes, confidences, threshhold):
     idxs = np.argsort(confidences)[::-1]
@@ -133,6 +146,8 @@ def get_yolo_model():
 
 def update_tracks(current_tracks, map_points, final_boxes):
     #region STEP 1: associate unambiguous cases
+    tier_1_start_time = time.perf_counter()
+
     used_map_points = []
     used_tracks = []
 
@@ -142,7 +157,7 @@ def update_tracks(current_tracks, map_points, final_boxes):
     for i in range(len(current_tracks)):
         track = current_tracks[i]
         #if track has not been found for n frames, ignore it
-        if count - track.get_point_times()[-1] > num_frames_considered_lost: continue
+        # if count - track.get_point_times()[-1] > num_frames_considered_lost: continue
         for j in range(len(map_points)):
             #if point in range
             if np.linalg.norm(map_points[j] - track.get_next_point(count)) < track.get_max_dist(count):
@@ -169,6 +184,9 @@ def update_tracks(current_tracks, map_points, final_boxes):
                 do_again = True
     
     #endregion
+
+    tier_1_end_time = time.perf_counter()
+    times["tier_1_update"].append(tier_1_end_time - tier_1_start_time)
 
     #get unused points, tracks, and boxes (not already assigned in previous step)
     unused_map_points = [map_points[i] for i in range(len(map_points)) if i not in used_map_points]
@@ -238,12 +256,14 @@ def update_tracks(current_tracks, map_points, final_boxes):
             if e_idx >= num_points or t_idx >= num_tracks:
                 continue
 
-            if distance > 1.0:
+            if distance > 0.8:
                 print(f"continuing ({unused_tracks[t_idx].color}). Dist: {distance}")
                 continue
             else:
                 print(f"Matched ({unused_tracks[t_idx].color}) with distance {distance}.")
-                print(f" -> Time weight: {min((count - unused_tracks[t_idx].point_times[-1]) / max_time_since_last_detection, 1)}")
+                time_cost = min((count - unused_tracks[t_idx].point_times[-1]) / max_time_since_last_detection, 1)
+                print(f" -> Time cost: {time_cost}")
+                print(f" -> Embedding distance: {distance - time_cost * (1 - weight_re_id)}")
 
 
             assigned_embeddings.add(e_idx)
@@ -257,6 +277,9 @@ def update_tracks(current_tracks, map_points, final_boxes):
             )
     
         #endregion
+
+        tier_2_end_time = time.perf_counter()
+        times["tier_2_update"].append(tier_2_end_time - tier_1_end_time)
 
     # new tracks for new embeddings
     unassigned_embeddings = set(range(len(unused_map_points))) - assigned_embeddings
@@ -289,6 +312,7 @@ for _ in range(count):
     cap.read()
 
 while cap.isOpened():
+    frame_start_time = time.perf_counter()
     print(f"New {count/video_fps:.2f}--------------------------------")
     if count >= end_frame:
         print("Done")
@@ -303,7 +327,13 @@ while cap.isOpened():
     #new map image to annotate (so as not to corrupt the original)
     new_map_img = map_img.copy()
 
+    yolo_start_time = time.perf_counter()
+    times["before_yolo"].append(yolo_start_time - frame_start_time)
+
     final_boxes, map_points, final_confidences = get_yolo_model()
+
+    yolo_end_time = time.perf_counter()
+    times["yolo"].append(yolo_end_time - yolo_start_time)
 
     if len(final_boxes) == 0: 
         print("no detections")
@@ -359,6 +389,8 @@ while cap.isOpened():
                 for i, t_idx in enumerate(tracks_needing_embeddings):
                     current_tracks[t_idx].add_embedding(embeddings[i], count)
 
+    draw_start_time = time.perf_counter()
+
     display_frame = frame.copy()
 
     #draw boxes
@@ -372,6 +404,7 @@ while cap.isOpened():
     for track in current_tracks:
         for pt in track.get_points()[-10:]:
             cv2.circle(new_map_img, (pt[0], pt[1]), 10, track.color, -1)
+            cv2.putText(new_map_img, str(track.id), (pt[0]-5, pt[1]+5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
         point = track.get_next_point(count)
         cv2.circle(new_map_img, (int(point[0]), int(point[1])), int(track.get_max_dist(count)), track.color)
 
@@ -379,6 +412,7 @@ while cap.isOpened():
     for track in current_tracks:
         for pt in track.get_points()[-1:]:
             cv2.circle(new_map_img, (pt[0], pt[1]), 10, track.color, -1)
+            cv2.putText(new_map_img, str(track.id), (pt[0]-5, pt[1]+5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 5)
         point = track.get_next_point(count)
     
     for map_point in map_points:
@@ -386,15 +420,27 @@ while cap.isOpened():
 
     cv2.imshow("Scouting", display_frame)
     cv2.imshow("Positions", new_map_img)
+    
+    draw_end_time = time.perf_counter()
+    times["draw_images"].append(draw_end_time - draw_start_time)
+
+    for i in range(len(current_tracks)):
+        if len(current_tracks[i].point_times)==0:
+            continue
+        if current_tracks[i].point_times[-1]==count:
+            pt_idx = [idx for idx, pt in enumerate(map_points) if pt is current_tracks[i].get_points()[-1]][0]
+            x1, y1, x2, y2 = map(int, final_boxes[pt_idx])
+            crop = cv2.resize(crop_with_padding(frame, x1, x2, y1, y2), image_size)
+
+            os.makedirs(f"./{i}", exist_ok=True)
+            cv2.imwrite(f"./{i}/{count/video_fps:.2f}_{i}.jpg", crop)
+
+    times["save_images"].append(time.perf_counter() - draw_end_time)
 
     should_exit = False
     # while True:
     #     key = cv2.waitKey(0) & 0xFF
     #     if key == 32:  #spacebar
-    #         for _ in range(frame_jump - 1):
-    #             cap.read()
-                
-    #         count += frame_jump
     #         break 
             
     #     elif key == ord("q"):
@@ -410,22 +456,19 @@ while cap.isOpened():
     
     if should_exit:
         break
-    
-    for i in range(len(current_tracks)):
-        if len(current_tracks[i].point_times)==0:
-            continue
-        if current_tracks[i].point_times[-1]==count:
-            pt_idx = [idx for idx, pt in enumerate(map_points) if pt is current_tracks[i].get_points()[-1]][0]
-            x1, y1, x2, y2 = map(int, final_boxes[pt_idx])
-            crop = cv2.resize(crop_with_padding(frame, x1, x2, y1, y2), image_size)
-
-            os.makedirs(f"./{i}", exist_ok=True)
-            cv2.imwrite(f"./{i}/{count/video_fps:.2f}_{i}.jpg", crop)
 
     for _ in range(frame_jump - 1):
         cap.read()
         
     count += frame_jump
 
+    #end time of the frame
+    frame_end_time = time.perf_counter()
+    times["per_frame"].append(frame_end_time - frame_start_time)
+
+print(times)
+
+for key, time_array in times.items():
+    print(f"Average time for {key}: {sum(time_array) / len(time_array)}")
 cap.release()
 cv2.destroyAllWindows()
