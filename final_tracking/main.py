@@ -23,27 +23,27 @@ map_img = cv2.imread("assets/full_field.png")
 
 start_seconds = 7
 end_seconds = 128
-frame_jump = 5
+frame_jump = 8
 
-yolo_model_path = './best.pt'
-yolo_conf=0.3
+yolo_model_path = './best_int8_openvino_model/'
+yolo_conf=0.7
 yolo_iom=0.1
 yolo_model = YOLO(yolo_model_path)
 
 MODEL_FILEPATH = "./model.weights.h5"
 re_id_model = build_embedding_model(MODEL_FILEPATH)
 image_size = (128, 128)
-num_images_to_save_per_track = 12
-save_frequency = 10
+num_images_to_save_per_track = 20
+save_frequency = 16
+save_to_disc_frequency = 32
 
 video_fps = cap.get(cv2.CAP_PROP_FPS)
 start_frame = int(video_fps * start_seconds)
 count = start_frame
-print(count)
 end_frame = int(video_fps * end_seconds)
 
-num_frames_considered_lost = 1 * video_fps #number of frames track can go without detections before being considered lost
-weight_re_id = 0.6 #when matching using visual features, the weight assigned to the re-id model score (rest is assigned based on time since last detection)
+num_frames_considered_lost = 0.5 * video_fps #number of frames track can go without detections before being considered lost
+weight_re_id = 0.5 #when matching using visual features, the weight assigned to the re-id model score (rest is assigned based on time since last detection)
 max_time_since_last_detection = 3 * video_fps
 
 scouter = FrameToPoints(
@@ -116,12 +116,7 @@ def get_yolo_model():
     #array of confidences from the YOLO model where confidences[i] corresponds to the box at video_boxes[i]
     confidences = []
     
-    predictions = yolo_model.predict(
-        frame, 
-        conf=float(yolo_conf), 
-        verbose=False,
-        agnostic_nms=True
-    )
+    predictions = yolo_model(frame, device="cpu", conf=yolo_conf)
  
     result = predictions[0]
     boxes = result.boxes.xyxy.cpu().numpy().copy()
@@ -157,7 +152,7 @@ def update_tracks(current_tracks, map_points, final_boxes):
     for i in range(len(current_tracks)):
         track = current_tracks[i]
         #if track has not been found for n frames, ignore it
-        # if count - track.get_point_times()[-1] > num_frames_considered_lost: continue
+        if count - track.get_point_times()[-1] > num_frames_considered_lost: continue
         for j in range(len(map_points)):
             #if point in range
             if np.linalg.norm(map_points[j] - track.get_next_point(count)) < track.get_max_dist(count):
@@ -178,6 +173,7 @@ def update_tracks(current_tracks, map_points, final_boxes):
             if len(points_claimed) == 0: continue
 
             if len(points_claimed) == 1 and len(point_claims[points_claimed[0]]) == 1:
+                print(f"Matched {track.id} or ({track.color}) with no re-id.")
                 track.add_point(map_points[points_claimed[0]], count)
                 used_tracks.append(track_idx)
                 used_map_points.append(points_claimed[0])
@@ -257,13 +253,12 @@ def update_tracks(current_tracks, map_points, final_boxes):
                 continue
 
             if distance > 0.8:
-                print(f"continuing ({unused_tracks[t_idx].color}). Dist: {distance}")
+                time_cost = min((count - unused_tracks[t_idx].point_times[-1]) / max_time_since_last_detection, 1)
+                print(f"Skipped {unused_tracks[t_idx].id}. Dist: {distance:.2f}. Time: {time_cost:.2f}, emb: {((distance - time_cost * (1 - weight_re_id)) / weight_re_id):.2f}")
                 continue
             else:
-                print(f"Matched ({unused_tracks[t_idx].color}) with distance {distance}.")
                 time_cost = min((count - unused_tracks[t_idx].point_times[-1]) / max_time_since_last_detection, 1)
-                print(f" -> Time cost: {time_cost}")
-                print(f" -> Embedding distance: {distance - time_cost * (1 - weight_re_id)}")
+                print(f"Matched {unused_tracks[t_idx].id}. Dist: {distance:.2f}. Time: {time_cost:.2f}, emb: {((distance - time_cost * (1 - weight_re_id)) / weight_re_id):.2f}")
 
 
             assigned_embeddings.add(e_idx)
@@ -424,20 +419,22 @@ while cap.isOpened():
     draw_end_time = time.perf_counter()
     times["draw_images"].append(draw_end_time - draw_start_time)
 
-    for i in range(len(current_tracks)):
-        if len(current_tracks[i].point_times)==0:
-            continue
-        if current_tracks[i].point_times[-1]==count:
-            pt_idx = [idx for idx, pt in enumerate(map_points) if pt is current_tracks[i].get_points()[-1]][0]
-            x1, y1, x2, y2 = map(int, final_boxes[pt_idx])
-            crop = cv2.resize(crop_with_padding(frame, x1, x2, y1, y2), image_size)
+    if (count - start_frame) % save_to_disc_frequency == 0:
+        for i in range(len(current_tracks)):
+            if len(current_tracks[i].point_times)==0:
+                continue
+            if current_tracks[i].point_times[-1]==count:
+                pt_idx = [idx for idx, pt in enumerate(map_points) if pt is current_tracks[i].get_points()[-1]][0]
+                x1, y1, x2, y2 = map(int, final_boxes[pt_idx])
+                crop = cv2.resize(crop_with_padding(frame, x1, x2, y1, y2), image_size)
 
-            os.makedirs(f"./{i}", exist_ok=True)
-            cv2.imwrite(f"./{i}/{count/video_fps:.2f}_{i}.jpg", crop)
+                os.makedirs(f"./{i}", exist_ok=True)
+                cv2.imwrite(f"./{i}/{count/video_fps:.2f}_{i}.jpg", crop)
 
     times["save_images"].append(time.perf_counter() - draw_end_time)
 
     should_exit = False
+
     # while True:
     #     key = cv2.waitKey(0) & 0xFF
     #     if key == 32:  #spacebar

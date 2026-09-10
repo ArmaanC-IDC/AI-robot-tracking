@@ -17,16 +17,16 @@ class Track:
     px_to_m = 570 / 16.54
 
     #account for errors in drawing the bounding boxes
-    min_circle_radius = 30
+    min_circle_radius = 40
 
-    max_accel = 14 #in m/s^2
-    max_vel = 6 #in m/s
+    max_accel = 18 #in m/s^2
+    max_vel = 4 #in m/s
 
     fps = 0
 
     num_images_to_compare_to = 5
 
-    velocity_smoothing_factor = 0.5
+    velocity_smoothing_factor = 0.15
 
     def __init__(self, color, embeddings, id, fps=None):
         self.color = color
@@ -82,9 +82,9 @@ class Track:
         return np.mean(np.array([-x for x in max_heap]))
 
     def get_current_vel(self, frame_num, use_for_dist=False):
-        #if cannot find velocity (first point or has been lost for half second or more), 
+        #if cannot find velocity (first point or has been lost for a or more), 
         # assume max velocity for distance and 0 velocity for point
-        if len(self.points)==0 or frame_num - self.point_times[-1] > Track.fps * 0.5:
+        if len(self.points)==0 or frame_num - self.point_times[-1] > Track.fps * 1:
             return np.array([Track.max_vel, 0]) if use_for_dist else np.array([0, 0])
         
         #if can't calculate velocity normally, return 0
@@ -94,6 +94,9 @@ class Track:
         #normally, calculate the velocity        
         current_vel = (self.points[-1] - self.points[-2]) / (self.point_times[-1] - self.point_times[-2])
         final_vel = current_vel * (1 - self.velocity_smoothing_factor) + self.prev_vel * self.velocity_smoothing_factor
+
+        if np.linalg.norm(final_vel) > self.max_vel:
+            final_vel = final_vel * (self.max_vel / np.linalg.norm(final_vel))
         self.prev_vel = final_vel
 
         return final_vel
