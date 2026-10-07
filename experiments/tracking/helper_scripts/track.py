@@ -42,14 +42,38 @@ class Track:
         # self.images = []
 
         self.prev_vel = 0
+        self.last_point_calc_method = "init"
+        self.last_embedding_score = None
+        self.last_time_score = None
+        self.last_match_score = None
     
-    def add_point(self, point, time, include_embedding=False, embedding=None):
+    def add_point(self, 
+        point, 
+        time, 
+        last_point_calc_method, 
+        include_embedding=False, 
+        embedding=None,
+        embedding_score=None,
+        time_score=None,
+        match_score=None,
+    ):
         self.points.append(point)
         self.point_times.append(time)
+
+        self.last_point_calc_method = last_point_calc_method
 
         if include_embedding:
             self.embeddings.append(embedding)
             self.embedding_times.append(time)
+
+            self.last_embedding_score = embedding_score
+            self.last_time_score = time_score
+            self.last_match_score = match_score
+
+        else:
+            self.last_embedding_score = None
+            self.last_time_score = None
+            self.last_match_score = None
     
     def get_num_embeddings(self):
         return len(self.embeddings)

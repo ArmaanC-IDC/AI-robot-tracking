@@ -1,32 +1,36 @@
-#TODO: Remove displaying and saving images
-
 import cv2
 import numpy as np
 import sys
 import os
+import json
 from scipy.optimize import linear_sum_assignment
-
-video_path = '././2026ontor_sf1m1.mp4'
-cap = cv2.VideoCapture(video_path)
-
-if not cap.isOpened() or cap.get(cv2.CAP_PROP_FPS)==0:
-    print("Error: Could not open video.")
-    sys.exit()
-
 from helper_scripts.build_model import build_embedding_model
 from helper_scripts.frame_to_points import FrameToPoints
 from helper_scripts.track import Track
 from ultralytics import YOLO
 import time
 
+video_path = '././2026ontor_sf1m1.mp4'
+
+# Automatically generate output json filename from the video filename
+video_basename = os.path.basename(video_path)
+video_name_no_ext = os.path.splitext(video_basename)[0]
+output_json_path = f"{video_name_no_ext}_predictions.json"
+
+cap = cv2.VideoCapture(video_path)
+
+if not cap.isOpened() or cap.get(cv2.CAP_PROP_FPS)==0:
+    print("Error: Could not open video.")
+    sys.exit()
+
 map_img = cv2.imread("assets/full_field.png")
 
-start_seconds = 7
-end_seconds = 128
+start_seconds = 12 
+end_seconds = 32 
 frame_jump = 8
 
 yolo_model_path = './best_int8_openvino_model/'
-yolo_conf=0.7
+yolo_conf=0.4
 yolo_iom=0.1
 yolo_model = YOLO(yolo_model_path)
 
@@ -60,6 +64,8 @@ times = {
     "save_images": []
 }
 
+# Container to store predictions for JSON export
+all_predictions = []
 
 def IoM(boxes, confidences, threshhold):
     idxs = np.argsort(confidences)[::-1]
@@ -106,14 +112,9 @@ def crop_with_padding(img, x1, x2, y1, y2, pad_ratio=0.10):
     
     return img[ny1:ny2, nx1:nx2]
 
-def get_yolo_model():
-    #map points is an array of points that robots occupy on the game map
+def get_yolo_model(frame):
     map_points = []
-
-    #array of boxes
     video_boxes = []
-
-    #array of confidences from the YOLO model where confidences[i] corresponds to the box at video_boxes[i]
     confidences = []
     
     predictions = yolo_model(frame, device="cpu", conf=yolo_conf)
@@ -122,15 +123,12 @@ def get_yolo_model():
     boxes = result.boxes.xyxy.cpu().numpy().copy()
     confidences = result.boxes.conf.cpu().numpy().copy()
 
-    #fallback in case IoM returns no indices
     video_boxes = boxes
 
-    #list of indices that are valid boxes (do not overlap too much)
     indices = IoM(boxes, confidences.tolist(), yolo_iom)
     
     if len(indices) > 0:
         indices = np.array(indices).flatten()
-        
         video_boxes = boxes[indices].reshape(-1, 4)
         confidences = confidences[indices]
 
@@ -140,7 +138,6 @@ def get_yolo_model():
     return final_boxes, map_points, final_confidences
 
 def update_tracks(current_tracks, map_points, final_boxes):
-    #region STEP 1: associate unambiguous cases
     tier_1_start_time = time.perf_counter()
 
     used_map_points = []
@@ -148,18 +145,15 @@ def update_tracks(current_tracks, map_points, final_boxes):
 
     track_claims = {i: [] for i in range(len(current_tracks))}
     point_claims = {i: [] for i in range(len(map_points))}
-    #get all points in range of all Tracks
+    
     for i in range(len(current_tracks)):
         track = current_tracks[i]
-        #if track has not been found for n frames, ignore it
         if count - track.get_point_times()[-1] > num_frames_considered_lost: continue
         for j in range(len(map_points)):
-            #if point in range
             if np.linalg.norm(map_points[j] - track.get_next_point(count)) < track.get_max_dist(count):
                 track_claims[i].append(j)
                 point_claims[j].append(i)
 
-    #keep repeating logic until all tracks with only one possible point are satisfied
     do_again = True
     while do_again:       
         do_again = False
@@ -178,18 +172,13 @@ def update_tracks(current_tracks, map_points, final_boxes):
                 used_tracks.append(track_idx)
                 used_map_points.append(points_claimed[0])
                 do_again = True
-    
-    #endregion
 
     tier_1_end_time = time.perf_counter()
     times["tier_1_update"].append(tier_1_end_time - tier_1_start_time)
 
-    #get unused points, tracks, and boxes (not already assigned in previous step)
     unused_map_points = [map_points[i] for i in range(len(map_points)) if i not in used_map_points]
     unused_tracks = [current_tracks[i] for i in range(len(current_tracks)) if i not in used_tracks]
     unused_boxes = [final_boxes[i] for i in range(len(map_points)) if i not in used_map_points]
-
-    #region Visual association
 
     if len(unused_map_points) == 0: return
 
@@ -204,24 +193,20 @@ def update_tracks(current_tracks, map_points, final_boxes):
             ]
         )
     
-
     embeddings = re_id_model.predict(np.array([process_image(crop) for crop in crops]), verbose=1)
     print(f"calculated {len(embeddings)} embeddings (association)")
 
     if len(unused_tracks) > 0:
-        #new track/point claims with only unused points and tracks
         track_claims = {i: [] for i in range(len(unused_tracks))}
         point_claims = {i: [] for i in range(len(unused_map_points))}
-        #get all points in range of all Tracks
+        
         for i in range(len(unused_tracks)):
             track = unused_tracks[i]
             for j in range(len(unused_map_points)):
-                #if point in range
                 if np.linalg.norm(unused_map_points[j] - track.get_next_point(count)) < track.get_max_dist(count):
                     track_claims[i].append(j)
                     point_claims[j].append(i)
 
-        #Build a matrix where  rows = new embeddings, cols = existing tracks
         num_points = len(unused_map_points)
         num_tracks = len(unused_tracks)
         cost_matrix = np.full((num_points, num_tracks), 1e9)
@@ -230,22 +215,17 @@ def update_tracks(current_tracks, map_points, final_boxes):
             for t_idx, track in enumerate(unused_tracks):
                 if e_idx in track_claims[t_idx] and t_idx in point_claims[e_idx]:
                     min_dist = track.get_distance(embedding) 
-
                     time_since_last_found = count - track.point_times[-1]
-                    
                     cost_matrix[e_idx, t_idx] = (min_dist * weight_re_id) + min(time_since_last_found / max_time_since_last_detection, 1) * (1 - weight_re_id)
 
-        #expand the cost matrix to have dummy rows and columns
         h_dummy_block = np.full((num_points, num_points), 1e5)
         v_dummy_block = np.hstack((np.full((num_tracks, num_tracks), 1e5), np.full((num_tracks, num_points), 0)))
 
         cost_matrix = np.hstack((cost_matrix, h_dummy_block))
         cost_matrix = np.vstack((cost_matrix, v_dummy_block))
 
-        #get the best assignments
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
-        # Apply the assignments
         for e_idx, t_idx in zip(row_ind, col_ind):
             distance = cost_matrix[e_idx, t_idx]
 
@@ -254,29 +234,24 @@ def update_tracks(current_tracks, map_points, final_boxes):
 
             if distance > 0.8:
                 time_cost = min((count - unused_tracks[t_idx].point_times[-1]) / max_time_since_last_detection, 1)
-                print(f"Skipped {unused_tracks[t_idx].id}. Dist: {distance:.2f}. Time: {time_cost:.2f}, emb: {((distance - time_cost * (1 - weight_re_id)) / weight_re_id):.2f}")
+                print(f"Skipped {unused_tracks[t_idx].id}. Dist: {distance:.2f}.")
                 continue
             else:
                 time_cost = min((count - unused_tracks[t_idx].point_times[-1]) / max_time_since_last_detection, 1)
-                print(f"Matched {unused_tracks[t_idx].id}. Dist: {distance:.2f}. Time: {time_cost:.2f}, emb: {((distance - time_cost * (1 - weight_re_id)) / weight_re_id):.2f}")
-
+                print(f"Matched {unused_tracks[t_idx].id}. Dist: {distance:.2f}.")
 
             assigned_embeddings.add(e_idx)
             
-            # Assign the embedding to the track
             unused_tracks[t_idx].add_point(
-                unused_map_points[e_idx], # the point to add
-                count,             # the frame number
-                True,              # include the embedding
-                embeddings[e_idx], # the embedding to include
+                unused_map_points[e_idx],
+                count,
+                True,
+                embeddings[e_idx],
             )
-    
-        #endregion
 
         tier_2_end_time = time.perf_counter()
         times["tier_2_update"].append(tier_2_end_time - tier_1_end_time)
 
-    # new tracks for new embeddings
     unassigned_embeddings = set(range(len(unused_map_points))) - assigned_embeddings
 
     for e_idx in unassigned_embeddings:
@@ -289,6 +264,13 @@ def update_tracks(current_tracks, map_points, final_boxes):
         ))
 
         current_tracks[-1].add_point(unused_map_points[e_idx], count)
+
+    for track in current_tracks[:]:
+        if count - track.get_point_times()[-1] > 3 * frame_jump and len(track.get_point_times()) == 1:
+            current_tracks.remove(track)
+            print(f"removed track {track.id}")
+        else:
+            print(f"kept track {str(track.id)}")
 
 current_tracks = []
 track_colors = [
@@ -314,18 +296,17 @@ while cap.isOpened():
         break
 
     success, frame = cap.read()
-    frame = cv2.resize(frame, (1280, 720))
     if not success: 
         print("End of video stream reached.")
         break
+    frame = cv2.resize(frame, (1280, 720))
     
-    #new map image to annotate (so as not to corrupt the original)
     new_map_img = map_img.copy()
 
     yolo_start_time = time.perf_counter()
     times["before_yolo"].append(yolo_start_time - frame_start_time)
 
-    final_boxes, map_points, final_confidences = get_yolo_model()
+    final_boxes, map_points, final_confidences = get_yolo_model(frame)
 
     yolo_end_time = time.perf_counter()
     times["yolo"].append(yolo_end_time - yolo_start_time)
@@ -334,7 +315,6 @@ while cap.isOpened():
         print("no detections")
         continue
 
-    #initialize tracks
     if count==int(video_fps * start_seconds):
         crops = np.array(
             [
@@ -357,11 +337,9 @@ while cap.isOpened():
         for i in range(len(map_points)): 
             current_tracks[i].add_point(map_points[i], count, True, embeddings[i])
 
-    #update tracks----------------------------------------
     else:                
-        update_tracks(current_tracks, map_points, final_boxes)    
+        update_tracks(current_tracks, map_points, final_boxes)       =
 
-        #add embeddings for any needed tracks
         if (count - start_frame) % save_frequency == 0:
             crops = []
             tracks_needing_embeddings = []
@@ -388,14 +366,12 @@ while cap.isOpened():
 
     display_frame = frame.copy()
 
-    #draw boxes
     for box, conf1 in zip(final_boxes, final_confidences):
         x1, y1, x2, y2 = map(int, box) 
         cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
         label = f"{conf1:.2f}"
         cv2.putText(display_frame, label, (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-    #draw map points
     for track in current_tracks:
         for pt in track.get_points()[-10:]:
             cv2.circle(new_map_img, (pt[0], pt[1]), 10, track.color, -1)
@@ -403,12 +379,10 @@ while cap.isOpened():
         point = track.get_next_point(count)
         cv2.circle(new_map_img, (int(point[0]), int(point[1])), int(track.get_max_dist(count)), track.color)
 
-    #draw latest map points
     for track in current_tracks:
         for pt in track.get_points()[-1:]:
             cv2.circle(new_map_img, (pt[0], pt[1]), 10, track.color, -1)
             cv2.putText(new_map_img, str(track.id), (pt[0]-5, pt[1]+5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 5)
-        point = track.get_next_point(count)
     
     for map_point in map_points:
         cv2.circle(new_map_img, (map_point[0], map_point[1]), 2, (0, 0, 255), -1)
@@ -418,6 +392,24 @@ while cap.isOpened():
     
     draw_end_time = time.perf_counter()
     times["draw_images"].append(draw_end_time - draw_start_time)
+
+    # Collect detections for the current frame to export later
+    frame_detections = []
+    for track in current_tracks:
+        if len(track.point_times) > 0 and track.point_times[-1] == count:
+            pts = track.get_points()
+            if len(pts) > 0:
+                latest_pt = pts[-1]
+                frame_detections.append({
+                    "id": str(track.id),
+                    "map_point": [int(latest_pt[0]), int(latest_pt[1])]
+                })
+
+    all_predictions.append({
+        "frame": count,
+        "time_seconds": round(count / video_fps, 3),
+        "detections": frame_detections
+    })
 
     if (count - start_frame) % save_to_disc_frequency == 0:
         for i in range(len(current_tracks)):
@@ -435,22 +427,15 @@ while cap.isOpened():
 
     should_exit = False
 
-    # while True:
-    #     key = cv2.waitKey(0) & 0xFF
-    #     if key == 32:  #spacebar
-    #         break 
-            
-    #     elif key == ord("q"):
-    #         should_exit = True
-    #         print(f"Quitting at frame {count}, or {count/video_fps}s")
-    #         break
+    while True:
+        key = cv2.waitKey(0) & 0xFF
+        if key == 32:  # spacebar
+            break 
+        elif key == ord("q"):
+            should_exit = True
+            print(f"Quitting at frame {count}, or {count/video_fps}s")
+            break
 
-    key = cv2.waitKey(1) & 0xFF        
-    if key == ord("q"):
-        should_exit = True
-        print(f"Quitting at frame {count}, or {count/video_fps}s")
-        break
-    
     if should_exit:
         break
 
@@ -458,14 +443,17 @@ while cap.isOpened():
         cap.read()
         
     count += frame_jump
-
-    #end time of the frame
     frame_end_time = time.perf_counter()
     times["per_frame"].append(frame_end_time - frame_start_time)
 
-print(times)
-
-for key, time_array in times.items():
-    print(f"Average time for {key}: {sum(time_array) / len(time_array)}")
 cap.release()
 cv2.destroyAllWindows()
+
+# Dump collected predictions to JSON file named after the video
+with open(output_json_path, "w") as f:
+    json.dump(all_predictions, f, indent=4)
+print(f"Successfully exported predictions to '{output_json_path}'.")
+
+for key, time_array in times.items():
+    if len(time_array) > 0:
+        print(f"Average time for {key}: {sum(time_array) / len(time_array)}")

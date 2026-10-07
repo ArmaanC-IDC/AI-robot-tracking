@@ -29,3 +29,4 @@ re-id-only-tracking/helper_scripts/__pycache__/build_model.cpython-311.pyc
 *.zip
 *.cache
 datasets/coco8/*
+experiments/annotations/*
